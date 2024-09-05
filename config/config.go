@@ -5,19 +5,13 @@ import (
 	"os"
 )
 
-/*
-[gossip]
-cache_size = 50
-degree = 3
-minConnections = 3
-maxConnections = 30
-bootstrapper =  127.0.0.1:1
-p2pAddress = 127.0.0.1:6001
-apiAddress = 127.0.0.1:7001
-knownPeers = 127.0.0.1:6002, 127.0.0.1:6003
-*/
+//
+//[log]
+//level = debug
+//destination = stdout
+//logFile = ../logs/config_1.log
 
-type Config struct {
+type GossipConfig struct {
 	CacheSize      int      `mapstructure:"cache_size"`
 	Degree         int      `mapstructure:"degree"`
 	MinConnections int      `mapstructure:"minConnections"`
@@ -28,11 +22,18 @@ type Config struct {
 	KnownPeers     []string `mapstructure:"knownPeers"`
 }
 
-var P2PConfig *Config
+type LogConfig struct {
+	Level       string `mapstructure:"level"`
+	Destination string `mapstructure:"destination"`
+	LogFile     string `mapstructure:"logFile"`
+}
+
+var P2PConfig *GossipConfig
+var LoggerConfig *LogConfig
 
 // LoadConfig load config via viper from file from the path
 // Input config path will indicate the path of the config file
-func LoadConfig(configPath string) (*Config, error) {
+func LoadConfig(configPath string) (*GossipConfig, error) {
 	//check whether the file exits
 	fileExists := fileExists(configPath)
 	if !fileExists {
@@ -45,9 +46,14 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	P2PConfig = &Config{}
+	P2PConfig = &GossipConfig{}
+	LoggerConfig = &LogConfig{}
 	//unmarshal the config file to the struct
 	err = viper.UnmarshalKey("gossip", P2PConfig)
+	if err != nil {
+		return nil, err
+	}
+	err = viper.UnmarshalKey("log", LoggerConfig)
 	if err != nil {
 		return nil, err
 	}
