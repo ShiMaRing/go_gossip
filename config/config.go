@@ -5,23 +5,27 @@ import (
 	"os"
 )
 
-type PeerConfig struct {
-	MinConnections int
-	MaxConnections int
-	Bootstraps     []string
-	PeerAddr       string
-	ApiAddr        string
-	KnownPeers     []string
-}
-
-type GossipConfig struct {
-	CacheSize int
-	Degree    int
-}
+/*
+[gossip]
+cache_size = 50
+degree = 3
+minConnections = 3
+maxConnections = 30
+bootstrapper =  127.0.0.1:1
+p2pAddress = 127.0.0.1:6001
+apiAddress = 127.0.0.1:7001
+knownPeers = 127.0.0.1:6002, 127.0.0.1:6003
+*/
 
 type Config struct {
-	Peer   PeerConfig
-	Gossip GossipConfig
+	CacheSize      int      `mapstructure:"cache_size"`
+	Degree         int      `mapstructure:"degree"`
+	MinConnections int      `mapstructure:"minConnections"`
+	MaxConnections int      `mapstructure:"maxConnections"`
+	Bootstrapper   string   `mapstructure:"bootstrapper"`
+	P2PAddress     string   `mapstructure:"p2pAddress"`
+	APIAddress     string   `mapstructure:"apiAddress"`
+	KnownPeers     []string `mapstructure:"knownPeers"`
 }
 
 var P2PConfig *Config
@@ -43,7 +47,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	P2PConfig = &Config{}
 	//unmarshal the config file to the struct
-	err = viper.Unmarshal(P2PConfig)
+	err = viper.UnmarshalKey("gossip", P2PConfig)
 	if err != nil {
 		return nil, err
 	}
