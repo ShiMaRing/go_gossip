@@ -2,17 +2,13 @@ package main
 
 import (
 	"go_gossip/config"
+	"go_gossip/utils"
 	"os"
 )
 
-func init() {
-
-}
-
-var args []string
+var args = os.Args[1:]
 
 func main() {
-	args = os.Args[1:]
 	if len(args) < 1 {
 		panic("config file path is required")
 	}
@@ -22,5 +18,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	utils.LogInit()
 	//start the gossip protocol
 }

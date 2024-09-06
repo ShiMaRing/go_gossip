@@ -11,6 +11,9 @@ import (
 //destination = stdout
 //logFile = ../logs/config_1.log
 
+var P2PConfig *GossipConfig
+var LoggerConfig *LogConfig
+
 type GossipConfig struct {
 	CacheSize      int      `mapstructure:"cache_size"`
 	Degree         int      `mapstructure:"degree"`
@@ -23,13 +26,9 @@ type GossipConfig struct {
 }
 
 type LogConfig struct {
-	Level       string `mapstructure:"level"`
-	Destination string `mapstructure:"destination"`
-	LogFile     string `mapstructure:"logFile"`
+	Level   string `mapstructure:"level"`
+	LogFile string `mapstructure:"logFile"`
 }
-
-var P2PConfig *GossipConfig
-var LoggerConfig *LogConfig
 
 // LoadConfig load config via viper from file from the path
 // Input config path will indicate the path of the config file
