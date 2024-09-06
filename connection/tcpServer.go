@@ -14,7 +14,6 @@ type TCPServer struct {
 	Name          string
 	IpAddr        string
 	HandleFrame   func(*model.CommonFrame) bool
-	CheckFrame    func(*model.CommonFrame) bool
 	server        net.Listener
 	closeFlag     bool
 	connectionCnt int //current connection count
@@ -113,10 +112,6 @@ func (g *TCPServer) handleConn(conn net.Conn) {
 		frame.Payload = payloadBuffer
 		//put the frame to the inputFrameChan
 		utils.Logger.Debug("%s receive a frame from %s", g.Name, conn.RemoteAddr().String())
-		valid := g.CheckFrame(frame) //discard the invalid frame and close the connection
-		if !valid {
-			return
-		}
 		inputFrameChan <- frame
 	}
 }
