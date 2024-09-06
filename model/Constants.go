@@ -2,7 +2,7 @@ package model
 
 const (
 	MAX_DATA_SIZE = 4096
-	ID_SIZE       = 16
+	ID_SIZE       = 2
 	FRAME_BUFFER  = 16
 
 	PEER_BROADCAST  = 510

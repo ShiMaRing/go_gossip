@@ -1,6 +1,8 @@
 package model
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+)
 
 type CommonFrame struct {
 	Size    uint16 //size of the message in bytes
@@ -128,12 +130,13 @@ type PeerBroadcastMessage struct {
 }
 
 type PeerRequestMessage struct {
-	Id [ID_SIZE]byte
+	MessageID uint16
+	Reserved  uint16
 }
 
 type PeerValidationMessage struct {
 	MessageID  uint16
-	Validation uint8
+	Validation uint16
 }
 
 type PeerDiscoveryMessage struct {
@@ -172,15 +175,18 @@ func (p *PeerBroadcastMessage) Unpack(data []byte) bool {
 }
 
 func (p *PeerRequestMessage) Pack() []byte {
-	return p.Id[:]
+	data := make([]byte, 4)
+	binary.BigEndian.PutUint16(data[:2], p.MessageID)
+	binary.BigEndian.PutUint16(data[2:4], p.Reserved)
+	return data
 }
 
 func (p *PeerRequestMessage) Unpack(data []byte) bool {
-	if len(data) != ID_SIZE {
+	if len(data) != 4 {
 		return false
 	}
-	p.Id = [ID_SIZE]byte{}
-	copy(p.Id[:], data[:ID_SIZE])
+	p.MessageID = binary.BigEndian.Uint16(data[:2])
+	p.Reserved = binary.BigEndian.Uint16(data[2:4])
 	return true
 }
 
@@ -196,18 +202,18 @@ func (p *PeerDiscoveryMessage) Unpack(data []byte) bool {
 }
 
 func (p *PeerValidationMessage) Pack() []byte {
-	data := make([]byte, 3)
+	data := make([]byte, 4)
 	binary.BigEndian.PutUint16(data[:2], p.MessageID)
-	data[2] = p.Validation
+	binary.BigEndian.PutUint16(data[2:4], p.Validation)
 	return data
 }
 
 func (p *PeerValidationMessage) Unpack(data []byte) bool {
-	if len(data) != 3 {
+	if len(data) != 4 {
 		return false
 	}
 	p.MessageID = binary.BigEndian.Uint16(data[:2])
-	p.Validation = data[2]
+	p.Validation = binary.BigEndian.Uint16(data[2:4])
 	return true
 }
 
@@ -243,4 +249,12 @@ func (p *PeerInfoMessage) Unpack(data []byte) bool {
 		data = data[12:]
 	}
 	return true
+}
+
+func MakeCommonFrame(messageType uint16, data []byte) *CommonFrame {
+	frame := &CommonFrame{}
+	frame.Type = messageType
+	frame.Payload = data
+	frame.Size = uint16(len(data))
+	return frame
 }

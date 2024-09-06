@@ -14,15 +14,17 @@ const MaxFrameBuffer = 16
 type TCPConnManager struct {
 	name               string
 	ipAddr             string
-	HandleFrame        func(*model.CommonFrame, net.Conn) (bool, error)
+	HandleFrame        func(*model.CommonFrame, net.Conn, *TCPConnManager) (bool, error)
 	server             net.Listener
 	closeFlag          bool
 	connectionCnt      int                 //current connection count
-	handlingConnection map[string]net.Conn //all connection that is handling
-	openingConnection  map[string]net.Conn //all connection that is opening
-	connRWLock         sync.RWMutex        //lock for the handlingConnection
-	cntRWLock          sync.RWMutex
-	closeFlagMutex     sync.Mutex
+	handlingConnection map[string]net.Conn //all connection that connect to us
+	trustedConnection  map[string]bool     //is this connection trusted ?
+
+	openingConnection map[string]net.Conn //all connection that we connect to
+	connRWLock        sync.RWMutex        //lock for the handlingConnection
+	cntRWLock         sync.RWMutex
+	closeFlagMutex    sync.Mutex
 
 	maxConnCnt int
 	minConnCnt int
@@ -79,28 +81,26 @@ func (g *TCPConnManager) PutConnection(conn net.Conn) {
 	g.connRWLock.Lock()
 	defer g.connRWLock.Unlock()
 	g.handlingConnection[conn.RemoteAddr().String()] = conn
+	g.trustedConnection[conn.RemoteAddr().String()] = false
+}
+
+func (g *TCPConnManager) TrustConnection(conn net.Conn) {
+	g.connRWLock.Lock()
+	defer g.connRWLock.Unlock()
+	g.trustedConnection[conn.RemoteAddr().String()] = true
 }
 
 func (g *TCPConnManager) RemoveConnection(conn net.Conn) {
 	g.connRWLock.Lock()
 	defer g.connRWLock.Unlock()
 	delete(g.handlingConnection, conn.RemoteAddr().String())
+	delete(g.trustedConnection, conn.RemoteAddr().String()) //we don't trust it anymore
 }
 
 func (g *TCPConnManager) GetConnectionSize() int {
 	g.connRWLock.RLock()
 	defer g.connRWLock.RUnlock()
 	return len(g.handlingConnection)
-}
-
-func (g *TCPConnManager) GetConnectionList() []net.Conn {
-	g.connRWLock.RLock()
-	defer g.connRWLock.RUnlock()
-	var connList []net.Conn
-	for _, conn := range g.handlingConnection {
-		connList = append(connList, conn)
-	}
-	return connList
 }
 
 func (g *TCPConnManager) GetConnectionByAddr(addr string) net.Conn {
@@ -111,6 +111,11 @@ func (g *TCPConnManager) GetConnectionByAddr(addr string) net.Conn {
 		return nil
 	}
 	return conn
+}
+
+func (g *TCPConnManager) SendMessage(conn net.Conn, frame *model.CommonFrame) error {
+
+	return nil
 }
 
 func (g *TCPConnManager) handleConn(conn net.Conn) {
@@ -168,7 +173,7 @@ func (g *TCPConnManager) StartFrameHandler(inputFrameChan chan *model.CommonFram
 	for {
 		select {
 		case frame := <-inputFrameChan:
-			success, err := g.HandleFrame(frame, conn)
+			success, err := g.HandleFrame(frame, conn, g)
 			if !success || err != nil {
 				utils.Logger.Error("%s: handle frame error with conn %s", g.name, conn.RemoteAddr().String())
 				return

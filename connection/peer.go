@@ -45,7 +45,7 @@ func NewPeerServer(ipAddr string) *PeerServer {
 }
 
 // handlePeerFrame handle the peer frame
-func handlePeerFrame(frame *model.CommonFrame, conn net.Conn) (bool, error) {
+func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPConnManager) (bool, error) {
 	if frame == nil {
 		return false, nil
 	}
@@ -79,7 +79,25 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn) (bool, error) {
 			return false, nil
 		}
 		//ok, this time we receive a request message
-
+		//check the max connection cnt
+		var newFrame *model.CommonFrame
+		connCnt := tcpManager.GetConnectionCnt()
+		if connCnt >= config.P2PConfig.MaxConnections {
+			reject := &model.PeerValidationMessage{}
+			reject.MessageID = request.MessageID
+			reject.Validation = 0 //reject
+			newFrame = model.MakeCommonFrame(model.PEER_VALIDATION, reject.Pack())
+		} else {
+			accept := &model.PeerValidationMessage{}
+			accept.MessageID = request.MessageID
+			accept.Validation = 1 //accept
+			newFrame = model.MakeCommonFrame(model.PEER_VALIDATION, accept.Pack())
+			tcpManager.TrustConnection(conn)
+		}
+		err := tcpManager.SendMessage(conn, newFrame) //send the reject or accept message to the peer
+		if err != nil {
+			return false, err
+		}
 	default:
 		return false, nil //unknown message type
 	}
