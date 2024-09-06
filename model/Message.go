@@ -139,7 +139,7 @@ type PeerBroadcastMessage struct {
 
 type PeerRequestMessage struct {
 	MessageID uint16
-	Reserved  uint16
+	PeerInfo  PeerInfo //request with my self info
 }
 
 type PeerValidationMessage struct {
@@ -183,18 +183,24 @@ func (p *PeerBroadcastMessage) Unpack(data []byte) bool {
 }
 
 func (p *PeerRequestMessage) Pack() []byte {
-	data := make([]byte, 4)
+	data := make([]byte, 2+12) //the peer info size is 4+2+4+2
 	binary.BigEndian.PutUint16(data[:2], p.MessageID)
-	binary.BigEndian.PutUint16(data[2:4], p.Reserved)
+	binary.BigEndian.PutUint32(data[2:6], p.PeerInfo.P2PIP)
+	binary.BigEndian.PutUint16(data[6:8], p.PeerInfo.P2PPort)
+	binary.BigEndian.PutUint32(data[8:12], p.PeerInfo.ApiIP)
+	binary.BigEndian.PutUint16(data[12:14], p.PeerInfo.APIPort)
 	return data
 }
 
 func (p *PeerRequestMessage) Unpack(data []byte) bool {
-	if len(data) != 4 {
+	if len(data) != 14 {
 		return false
 	}
 	p.MessageID = binary.BigEndian.Uint16(data[:2])
-	p.Reserved = binary.BigEndian.Uint16(data[2:4])
+	p.PeerInfo.P2PIP = binary.BigEndian.Uint32(data[2:6])
+	p.PeerInfo.P2PPort = binary.BigEndian.Uint16(data[6:8])
+	p.PeerInfo.ApiIP = binary.BigEndian.Uint32(data[8:12])
+	p.PeerInfo.APIPort = binary.BigEndian.Uint16(data[12:14])
 	return true
 }
 

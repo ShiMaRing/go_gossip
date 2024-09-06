@@ -18,10 +18,6 @@ func NewGossipServer(ipAddr string) *GossipServer {
 	return gossipServer
 }
 
-func (g *GossipServer) Start() {
-	g.gossipTcpManager.Start()
-}
-
 func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPConnManager) (bool, error) {
 	if frame == nil {
 		return false, nil

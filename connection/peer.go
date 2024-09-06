@@ -14,19 +14,27 @@ import (
 // offer the method to find the new peer and broadcast the message
 type PeerServer struct {
 	peerTcpManager *TCPConnManager
-	peerInfoList   []model.PeerInfo //max cache size will control the size of peer info list
-	listLock       sync.RWMutex
-	cacheSize      int
-	ourself        model.PeerInfo
-	gossipServer   *GossipServer
-
-	connIDMap     map[string]uint16 //key: target ip:port value: uint16 id in request
+	peerInfoList   []model.PeerInfo //max cache size will control the size of peer info list,
+	// only the peer we know both the p2p and gossip address will be added to the
+	//peer info list
+	listLock      sync.RWMutex
+	peerGossipMap map[string]string //key is the p2p addr and value is the gossip addr
+	mapLock       sync.RWMutex
+	cacheSize     int
+	ourself       model.PeerInfo
+	gossipServer  *GossipServer
 	connIDMapLock sync.RWMutex
 }
 
 var peerServer *PeerServer
 
-func NewPeerServer(ipAddr string) *PeerServer {
+// PeerServerStart start the peer server, the server will automatically connect to the known peers
+// and fetch the peer info from the known peers, util the
+func PeerServerStart(ipAddr string) {
+
+}
+
+func NewPeerServer(ipAddr string) {
 	var err error = nil
 	//we confirm the newTcpServer will not fail ,if fail ,we panic
 	peerServer := &PeerServer{
@@ -35,6 +43,12 @@ func NewPeerServer(ipAddr string) *PeerServer {
 	peerServer.peerTcpManager.HandleFrame = handlePeerFrame
 	peerServer.cacheSize = config.P2PConfig.CacheSize
 	peerServer.peerInfoList = make([]model.PeerInfo, 0)
+	peerServer.peerGossipMap = make(map[string]string)
+	peerServer.peerGossipMap[config.P2PConfig.P2PAddress] = config.P2PConfig.APIAddress
+	peerServer.peerGossipMap[config.P2PConfig.Bootstrapper] = "" //we don't know the gossip address of the bootstrapper
+	for _, peer := range config.P2PConfig.KnownPeers {
+		peerServer.peerGossipMap[peer] = "" //we don't know the gossip address of the known peers
+	}
 	var ourSelf = model.PeerInfo{}
 	//fill our self info with config
 	ourSelf.P2PIP, ourSelf.P2PPort, err = utils.ConvertAddr2Num(config.P2PConfig.P2PAddress)
@@ -49,7 +63,6 @@ func NewPeerServer(ipAddr string) *PeerServer {
 	}
 	peerServer.ourself = ourSelf
 	peerServer.peerInfoList = append(peerServer.peerInfoList, ourSelf) //add our self info to the peer info list
-	return peerServer
 }
 
 // ConnectToPeer connect to the peer
@@ -63,6 +76,7 @@ func (p *PeerServer) ConnectToPeer(ipAddr string) error {
 	request := &model.PeerRequestMessage{}
 	// generate a uint16 rand id
 	request.MessageID = uint16(rand.Intn(65536))
+	request.PeerInfo = p.ourself
 	// send the message to the server
 	conn := p.peerTcpManager.GetConnectionByAddr(ipAddr)
 	if conn == nil {
@@ -171,24 +185,6 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	return peerInfo.Peers, nil
 }
 
-func PutConnIDMap(key string, value uint16) {
-	peerServer.connIDMapLock.Lock()
-	defer peerServer.connIDMapLock.Unlock()
-	peerServer.connIDMap[key] = value
-}
-func GetConnIDMap(key string) (uint16, bool) {
-	peerServer.connIDMapLock.RLock()
-	defer peerServer.connIDMapLock.RUnlock()
-	value, ok := peerServer.connIDMap[key]
-	return value, ok
-}
-
-func RemoveConnIDMap(key string) {
-	peerServer.connIDMapLock.Lock()
-	defer peerServer.connIDMapLock.Unlock()
-	delete(peerServer.connIDMap, key)
-}
-
 // handlePeerFrame handle the peer frame in server side
 func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPConnManager) (bool, error) {
 	if frame == nil {
@@ -207,6 +203,8 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		//ok, this time we receive a discovery message
 		//send the peer info to the peer
 		peerInfo := &model.PeerInfoMessage{}
+		peerServer.listLock.RLock()
+		defer peerServer.listLock.RUnlock()
 		peerInfo.Cnt = uint16(len(peerServer.peerInfoList))
 		//add our self info to the peer info list
 		peerInfo.Peers = peerServer.peerInfoList
@@ -215,7 +213,6 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		if err != nil {
 			return false, err
 		}
-
 	case model.PEER_INFO: //as a server ,we don't deal with the info message
 		return false, nil
 
@@ -252,6 +249,23 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 			accept.Validation = 1 //accept
 			newFrame = model.MakeCommonFrame(model.PEER_VALIDATION, accept.Pack())
 			tcpManager.TrustConnection(conn)
+			//add the peerInfo to our cache
+			peerInfo := request.PeerInfo
+
+			peerServer.listLock.Lock()
+			defer peerServer.listLock.Unlock()
+
+			p2pAddr := utils.ConvertNum2Addr(peerInfo.P2PIP, peerInfo.P2PPort)
+			apiAddr := utils.ConvertNum2Addr(peerInfo.ApiIP, peerInfo.APIPort)
+			if _, ok := peerServer.peerGossipMap[p2pAddr]; !ok {
+				peerServer.peerGossipMap[p2pAddr] = apiAddr
+				peerServer.peerInfoList = append(peerServer.peerInfoList, peerInfo)
+				if len(peerServer.peerInfoList) > peerServer.cacheSize {
+					peerServer.peerInfoList = peerServer.peerInfoList[1:] //remove the first element
+				}
+			} else {
+				peerServer.peerGossipMap[p2pAddr] = apiAddr
+			}
 		}
 		err := tcpManager.SendMessage(conn, newFrame) //send the reject or accept message to the peer
 		if err != nil {
