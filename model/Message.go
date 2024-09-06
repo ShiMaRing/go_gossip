@@ -10,15 +10,15 @@ type CommonFrame struct {
 	Payload []byte
 }
 
-func (c *CommonFrame) Clear() {
-	c.Size = 0
-	c.Type = 0
-	c.Payload = nil
+func (f *CommonFrame) Clear() {
+	f.Size = 0
+	f.Type = 0
+	f.Payload = nil
 }
 
-func (c *CommonFrame) ParseHeader(buffer []byte) {
-	c.Size = binary.BigEndian.Uint16(buffer[:2])
-	c.Type = binary.BigEndian.Uint16(buffer[2:])
+func (f *CommonFrame) ParseHeader(buffer []byte) {
+	f.Size = binary.BigEndian.Uint16(buffer[:2])
+	f.Type = binary.BigEndian.Uint16(buffer[2:])
 }
 
 // =========================================================
@@ -46,6 +46,14 @@ type GossipNotificationMessage struct {
 type GossipValidationMessage struct {
 	MessageID  uint16
 	Validation uint16 //only the lowst bit is used
+}
+
+func (f *CommonFrame) Pack() []byte {
+	data := make([]byte, 4+len(f.Payload))
+	binary.BigEndian.PutUint16(data[:2], f.Size)
+	binary.BigEndian.PutUint16(data[2:4], f.Type)
+	copy(data[4:], f.Payload)
+	return data
 }
 
 func (g *GossipAnnounceMessage) Pack() []byte {

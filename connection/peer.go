@@ -1,9 +1,11 @@
 package connection
 
 import (
+	"fmt"
 	"go_gossip/config"
 	"go_gossip/model"
 	"go_gossip/utils"
+	"math/rand"
 	"net"
 	"sync"
 )
@@ -12,11 +14,17 @@ import (
 // offer the method to find the new peer and broadcast the message
 type PeerServer struct {
 	peerTcpManager *TCPConnManager
-	peerInfoList   []model.PeerInfo
+	peerInfoList   []model.PeerInfo //max cache size will control the size of peer info list
 	listLock       sync.RWMutex
 	cacheSize      int
 	ourself        model.PeerInfo
+	gossipServer   *GossipServer
+
+	connIDMap     map[string]uint16 //key: target ip:port value: uint16 id in request
+	connIDMapLock sync.RWMutex
 }
+
+var peerServer *PeerServer
 
 func NewPeerServer(ipAddr string) *PeerServer {
 	var err error = nil
@@ -40,11 +48,148 @@ func NewPeerServer(ipAddr string) *PeerServer {
 		panic(err)
 	}
 	peerServer.ourself = ourSelf
-	peerServer.peerInfoList = append(peerServer.peerInfoList, ourSelf)
+	peerServer.peerInfoList = append(peerServer.peerInfoList, ourSelf) //add our self info to the peer info list
 	return peerServer
 }
 
-// handlePeerFrame handle the peer frame
+// ConnectToPeer connect to the peer
+func (p *PeerServer) ConnectToPeer(ipAddr string) error {
+	err := p.peerTcpManager.ConnectToPeer(ipAddr)
+	if err != nil {
+		utils.Logger.Error("%s: connect to peer %s failed", p.peerTcpManager.name, ipAddr)
+		return err
+	}
+	// we need to let the peer trust us, so we need to send a request message to the peer
+	request := &model.PeerRequestMessage{}
+	// generate a uint16 rand id
+	request.MessageID = uint16(rand.Intn(65536))
+	// send the message to the server
+	conn := p.peerTcpManager.GetConnectionByAddr(ipAddr)
+	if conn == nil {
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return fmt.Errorf("connection to %s not found", ipAddr)
+	}
+	frame := model.MakeCommonFrame(model.PEER_REQUEST, request.Pack())
+	err = p.peerTcpManager.SendMessage(conn, frame)
+	if err != nil {
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		utils.Logger.Error("%s: send request message to peer %s failed", p.peerTcpManager.name, ipAddr)
+		return err
+	}
+	//read the conn for the validation message
+	headerBuffer := make([]byte, 4)
+	_, err = conn.Read(headerBuffer)
+	if err != nil {
+		utils.Logger.Error("%s: read header failed", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return err
+	}
+	//parse the header , we only want to get a validation message
+	frame = new(model.CommonFrame)
+	frame.ParseHeader(headerBuffer)
+	//read the payload
+	payloadBuffer := make([]byte, frame.Size)
+	_, err = conn.Read(payloadBuffer)
+	if err != nil {
+		utils.Logger.Error("%s: read payload failed", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return err
+	}
+	if frame.Type != model.PEER_VALIDATION {
+		utils.Logger.Error("%s: receive a invalid message type", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return fmt.Errorf("invalid message type")
+	}
+	validation := &model.PeerValidationMessage{}
+	if !validation.Unpack(payloadBuffer) {
+		utils.Logger.Error("%s: unpack validation message failed", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return fmt.Errorf("unpack validation message failed")
+	}
+	if validation.Validation == 0 {
+		utils.Logger.Warn("%s: peer %s reject the connection", p.peerTcpManager.name, ipAddr)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return fmt.Errorf("peer reject the connection")
+	}
+	//ok, the peer accept the connection
+	return nil
+}
+
+// GetPeerInfo use discovery message to get the peer info
+func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
+	conn := p.peerTcpManager.GetPeerConnection(ipAddr)
+	if conn == nil {
+		utils.Logger.Error("%s: connection to %s not found", p.peerTcpManager.name, ipAddr)
+		return nil, fmt.Errorf("connection to %s not found", ipAddr)
+	}
+	//ok ,we have the connection to the peer
+	//now we need to send the discovery message to the peer
+	discovery := &model.PeerDiscoveryMessage{}
+	frame := model.MakeCommonFrame(model.PEER_DISCOVERY, discovery.Pack())
+	err := p.peerTcpManager.SendMessage(conn, frame)
+	if err != nil {
+		utils.Logger.Error("%s: send discovery message to peer %s failed", p.peerTcpManager.name, ipAddr)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return nil, err
+	}
+	//read the conn for the peer info message
+	headerBuffer := make([]byte, 4)
+	_, err = conn.Read(headerBuffer)
+	if err != nil {
+		utils.Logger.Error("%s: read header failed", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return nil, err
+	}
+	//parse the header , we only want to get a peer info message
+	frame = new(model.CommonFrame)
+	frame.ParseHeader(headerBuffer)
+	if frame.Type != model.PEER_INFO || frame.Size > model.MAX_DATA_SIZE {
+		utils.Logger.Error("%s: receive a invalid message type", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return nil, fmt.Errorf("invalid message type")
+	}
+	//read the payload
+	var cnt uint16 = 0
+	payloadBuffer := make([]byte, frame.Size)
+	for cnt < frame.Size {
+		n, err := conn.Read(payloadBuffer[cnt:])
+		if err != nil {
+			utils.Logger.Error("%s: read payload failed", p.peerTcpManager.name)
+			defer p.peerTcpManager.ClosePeer(ipAddr)
+			break
+		}
+		cnt += uint16(n)
+	}
+	peerInfo := &model.PeerInfoMessage{}
+	if !peerInfo.Unpack(payloadBuffer) {
+		utils.Logger.Error("%s: unpack peer info message failed", p.peerTcpManager.name)
+		defer p.peerTcpManager.ClosePeer(ipAddr)
+		return nil, fmt.Errorf("unpack peer info message failed")
+	}
+	//ok, we get the peer info message
+	//extract them and append them to the peer info list
+	return peerInfo.Peers, nil
+}
+
+func PutConnIDMap(key string, value uint16) {
+	peerServer.connIDMapLock.Lock()
+	defer peerServer.connIDMapLock.Unlock()
+	peerServer.connIDMap[key] = value
+}
+func GetConnIDMap(key string) (uint16, bool) {
+	peerServer.connIDMapLock.RLock()
+	defer peerServer.connIDMapLock.RUnlock()
+	value, ok := peerServer.connIDMap[key]
+	return value, ok
+}
+
+func RemoveConnIDMap(key string) {
+	peerServer.connIDMapLock.Lock()
+	defer peerServer.connIDMapLock.Unlock()
+	delete(peerServer.connIDMap, key)
+}
+
+// handlePeerFrame handle the peer frame in server side
 func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPConnManager) (bool, error) {
 	if frame == nil {
 		return false, nil
@@ -55,24 +200,38 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		if !discovery.Unpack(frame.Payload) {
 			return false, nil
 		}
-
-	case model.PEER_INFO:
-		info := &model.PeerInfoMessage{}
-		if !info.Unpack(frame.Payload) {
+		//check the connection is the trusted connection?
+		if !tcpManager.IsTrustedConnection(conn) {
 			return false, nil
 		}
+		//ok, this time we receive a discovery message
+		//send the peer info to the peer
+		peerInfo := &model.PeerInfoMessage{}
+		peerInfo.Cnt = uint16(len(peerServer.peerInfoList))
+		//add our self info to the peer info list
+		peerInfo.Peers = peerServer.peerInfoList
+		newFrame := model.MakeCommonFrame(model.PEER_INFO, peerInfo.Pack())
+		err := tcpManager.SendMessage(conn, newFrame) //send the peer info to the peer
+		if err != nil {
+			return false, err
+		}
+
+	case model.PEER_INFO: //as a server ,we don't deal with the info message
+		return false, nil
 
 	case model.PEER_BROADCAST:
 		broadcast := &model.PeerBroadcastMessage{}
 		if !broadcast.Unpack(frame.Payload) {
 			return false, nil
 		}
-	case model.PEER_VALIDATION:
-		validation := &model.PeerValidationMessage{}
-		if !validation.Unpack(frame.Payload) {
+		if !tcpManager.IsTrustedConnection(conn) {
 			return false, nil
-
 		}
+		//ok, this time we receive a broadcast message
+
+	case model.PEER_VALIDATION: //this is the packet for client , as a server ,we don't deal with it
+		return false, nil
+
 	case model.PEER_REQUEST:
 		request := &model.PeerRequestMessage{}
 		if !request.Unpack(frame.Payload) {
@@ -101,6 +260,6 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 	default:
 		return false, nil //unknown message type
 	}
-	return false, nil
+	return true, nil
 
 }

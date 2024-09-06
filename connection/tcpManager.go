@@ -21,7 +21,7 @@ type TCPConnManager struct {
 	handlingConnection map[string]net.Conn //all connection that connect to us
 	trustedConnection  map[string]bool     //is this connection trusted ?
 
-	openingConnection map[string]net.Conn //all connection that we connect to
+	openingConnection map[string]net.Conn //all connection that we connect to, tcp manager will keep this connection
 	connRWLock        sync.RWMutex        //lock for the handlingConnection
 	cntRWLock         sync.RWMutex
 	closeFlagMutex    sync.Mutex
@@ -48,7 +48,32 @@ func NewTCPManager(name string, ipAddr string) *TCPConnManager {
 	return tcpManager
 }
 
-func (g *TCPConnManager) Start() {
+// ConnectToPeer connect to the peer
+func (g *TCPConnManager) ConnectToPeer(ipAddr string) error {
+	conn, err := net.Dial("tcp", ipAddr)
+	if err != nil {
+		utils.Logger.Error("%s: connect to peer %s failed", g.name, ipAddr)
+		return err
+	}
+	g.connRWLock.Lock()
+	defer g.connRWLock.Unlock()
+	g.openingConnection[ipAddr] = conn
+	return nil
+}
+
+// ClosePeer Close the connection with the peer
+func (g *TCPConnManager) ClosePeer(ipAddr string) {
+	g.connRWLock.Lock()
+	defer g.connRWLock.Unlock()
+	conn, ok := g.openingConnection[ipAddr]
+	if !ok {
+		return
+	}
+	_ = conn.Close()
+	delete(g.openingConnection, ipAddr)
+}
+
+func (g *TCPConnManager) StartServer() {
 	for {
 		conn, err := g.server.Accept()
 		if err != nil {
@@ -58,6 +83,16 @@ func (g *TCPConnManager) Start() {
 		utils.Logger.Debug("%s: accept a connection from %s", g.name, conn.RemoteAddr().String())
 		go g.handleConn(conn)
 	}
+}
+
+func (g *TCPConnManager) GetPeerConnection(addr string) net.Conn {
+	g.connRWLock.RLock()
+	defer g.connRWLock.RUnlock()
+	conn, ok := g.openingConnection[addr]
+	if !ok {
+		return nil
+	}
+	return conn
 }
 
 func (g *TCPConnManager) Stop() {
@@ -75,6 +110,12 @@ func (g *TCPConnManager) setClosed(flag bool) {
 	g.closeFlagMutex.Lock()
 	defer g.closeFlagMutex.Unlock()
 	g.closeFlag = flag
+}
+
+func (g *TCPConnManager) IsTrustedConnection(conn net.Conn) bool {
+	g.connRWLock.RLock()
+	defer g.connRWLock.RUnlock()
+	return g.trustedConnection[conn.RemoteAddr().String()]
 }
 
 func (g *TCPConnManager) PutConnection(conn net.Conn) {
@@ -114,7 +155,10 @@ func (g *TCPConnManager) GetConnectionByAddr(addr string) net.Conn {
 }
 
 func (g *TCPConnManager) SendMessage(conn net.Conn, frame *model.CommonFrame) error {
-
+	_, err := conn.Write(frame.Pack())
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

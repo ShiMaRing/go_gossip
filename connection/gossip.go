@@ -22,7 +22,7 @@ func (g *GossipServer) Start() {
 	g.gossipTcpManager.Start()
 }
 
-func handleGossipFrame(frame *model.CommonFrame, conn net.Conn) (bool, error) {
+func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPConnManager) (bool, error) {
 	if frame == nil {
 		return false, nil
 	}
