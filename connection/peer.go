@@ -11,25 +11,20 @@ import (
 // PeerServer store the information of the peer
 // offer the method to find the new peer and broadcast the message
 type PeerServer struct {
-	peerTcpServer *TCPServer
-	peerInfoList  []model.PeerInfo
-	listLock      sync.RWMutex
-
-	minConnCnt int
-	maxConnCnt int
-	cacheSize  int
-	ourself    model.PeerInfo
+	peerTcpManager *TCPConnManager
+	peerInfoList   []model.PeerInfo
+	listLock       sync.RWMutex
+	cacheSize      int
+	ourself        model.PeerInfo
 }
 
 func NewPeerServer(ipAddr string) *PeerServer {
 	var err error = nil
 	//we confirm the newTcpServer will not fail ,if fail ,we panic
 	peerServer := &PeerServer{
-		peerTcpServer: NewTCPServer("PeerServer", ipAddr),
+		peerTcpManager: NewTCPManager("PeerServer", ipAddr),
 	}
-	peerServer.peerTcpServer.HandleFrame = handlePeerFrame
-	peerServer.minConnCnt = config.P2PConfig.MinConnections
-	peerServer.maxConnCnt = config.P2PConfig.MaxConnections
+	peerServer.peerTcpManager.HandleFrame = handlePeerFrame
 	peerServer.cacheSize = config.P2PConfig.CacheSize
 	peerServer.peerInfoList = make([]model.PeerInfo, 0)
 	var ourSelf = model.PeerInfo{}
@@ -84,7 +79,7 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn) (bool, error) {
 			return false, nil
 		}
 		//ok, this time we receive a request message
-		//
+
 	default:
 		return false, nil //unknown message type
 	}

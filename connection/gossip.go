@@ -6,20 +6,20 @@ import (
 )
 
 type GossipServer struct {
-	gossipTcpServer *TCPServer
-	peerServer      *PeerServer
+	gossipTcpManager *TCPConnManager
+	peerServer       *PeerServer
 }
 
 func NewGossipServer(ipAddr string) *GossipServer {
 	gossipServer := &GossipServer{
-		gossipTcpServer: NewTCPServer("APIServer", ipAddr),
+		gossipTcpManager: NewTCPManager("APIServer", ipAddr),
 	}
-	gossipServer.gossipTcpServer.HandleFrame = handleGossipFrame
+	gossipServer.gossipTcpManager.HandleFrame = handleGossipFrame
 	return gossipServer
 }
 
 func (g *GossipServer) Start() {
-	g.gossipTcpServer.Start()
+	g.gossipTcpManager.Start()
 }
 
 func handleGossipFrame(frame *model.CommonFrame, conn net.Conn) (bool, error) {
