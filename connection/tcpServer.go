@@ -13,7 +13,7 @@ const MaxFrameBuffer = 16
 type TCPServer struct {
 	name          string
 	ipAddr        string
-	HandleFrame   func(*model.CommonFrame) bool
+	HandleFrame   func(*model.CommonFrame, net.Conn) (bool, error)
 	server        net.Listener
 	closeFlag     bool
 	connectionCnt int //current connection count
@@ -121,7 +121,9 @@ func (g *TCPServer) StartFrameHandler(inputFrameChan chan *model.CommonFrame, co
 	for {
 		select {
 		case frame := <-inputFrameChan:
-			if !g.HandleFrame(frame) {
+			success, err := g.HandleFrame(frame, conn)
+			if !success || err != nil {
+				utils.Logger.Error("%s: handle frame error with conn %s", g.name, conn.RemoteAddr().String())
 				return
 			}
 		}
