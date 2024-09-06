@@ -11,8 +11,8 @@ const MaxFrameBuffer = 16
 
 // TCPServer Gossip The gossip protocol implementation
 type TCPServer struct {
-	Name          string
-	IpAddr        string
+	name          string
+	ipAddr        string
 	HandleFrame   func(*model.CommonFrame) bool
 	server        net.Listener
 	closeFlag     bool
@@ -25,11 +25,11 @@ type TCPServer struct {
 // NewTCPServer Base on the config apiAddress to create a gossip server
 func NewTCPServer(name string, ipAddr string) *TCPServer {
 	var tcpServer = &TCPServer{}
-	tcpServer.IpAddr = ipAddr
-	tcpServer.Name = name
-	listener, err := net.Listen("tcp", tcpServer.IpAddr)
+	tcpServer.ipAddr = ipAddr
+	tcpServer.name = name
+	listener, err := net.Listen("tcp", tcpServer.ipAddr)
 	if err != nil { // when we start gossip server fail,just panic
-		utils.Logger.Error("%s: api server listen failed", tcpServer.Name, err)
+		utils.Logger.Error("%s: api server listen failed", tcpServer.name, err)
 		panic(err)
 	}
 	defer listener.Close()
@@ -45,7 +45,7 @@ func (g *TCPServer) Start() {
 			utils.Logger.Error("accept error", err)
 			break
 		}
-		utils.Logger.Debug("%s: accept a connection from %s", g.Name, conn.RemoteAddr().String())
+		utils.Logger.Debug("%s: accept a connection from %s", g.name, conn.RemoteAddr().String())
 		go g.handleConn(conn)
 	}
 }
@@ -84,34 +84,34 @@ func (g *TCPServer) handleConn(conn net.Conn) {
 	for {
 		cnt = 0
 		if g.isClosed() {
-			utils.Logger.Debug("%s: close the connection with %s", g.Name, conn.RemoteAddr().String())
+			utils.Logger.Debug("%s: close the connection with %s", g.name, conn.RemoteAddr().String())
 			return
 		}
 		frame := new(model.CommonFrame)
 		_, err := conn.Read(headerBuffer)
 		if err != nil {
-			utils.Logger.Error("%s: read header error with conn %s", g.Name, conn.RemoteAddr().String())
+			utils.Logger.Error("%s: read header error with conn %s", g.name, conn.RemoteAddr().String())
 			return
 		}
 		//parse the header
 		frame.ParseHeader(headerBuffer)
 		//read the payload
 		if frame.Size > model.MAX_DATA_SIZE {
-			utils.Logger.Error("%s: frame size exceed the max size with conn %s", g.Name, conn.RemoteAddr().String())
+			utils.Logger.Error("%s: frame size exceed the max size with conn %s", g.name, conn.RemoteAddr().String())
 			return
 		}
 		payloadBuffer := make([]byte, frame.Size)
 		for cnt < frame.Size {
 			n, err := conn.Read(payloadBuffer[cnt:])
 			if err != nil {
-				utils.Logger.Error("%s: read payload error with conn %s", g.Name, conn.RemoteAddr().String())
+				utils.Logger.Error("%s: read payload error with conn %s", g.name, conn.RemoteAddr().String())
 				return
 			}
 			cnt += uint16(n)
 		}
 		frame.Payload = payloadBuffer
 		//put the frame to the inputFrameChan
-		utils.Logger.Debug("%s receive a frame from %s", g.Name, conn.RemoteAddr().String())
+		utils.Logger.Debug("%s receive a frame from %s", g.name, conn.RemoteAddr().String())
 		inputFrameChan <- frame
 	}
 }

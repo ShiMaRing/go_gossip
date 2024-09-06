@@ -46,7 +46,16 @@ type GossipValidationMessage struct {
 	Validation uint16 //only the lowst bit is used
 }
 
-func (g *GossipAnnounceMessage) unpack(data []byte) bool {
+func (g *GossipAnnounceMessage) Pack() []byte {
+	data := make([]byte, 4+len(g.Data))
+	data[0] = g.TTL
+	data[1] = g.Reserved
+	binary.BigEndian.PutUint16(data[2:4], g.DataType)
+	copy(data[4:], g.Data)
+	return data
+}
+
+func (g *GossipAnnounceMessage) Unpack(data []byte) bool {
 	if len(data) < 4 {
 		return false
 	}
@@ -57,7 +66,14 @@ func (g *GossipAnnounceMessage) unpack(data []byte) bool {
 	return true
 }
 
-func (g *GossipNotifyMessage) unpack(data []byte) bool {
+func (g *GossipNotifyMessage) Pack() []byte {
+	data := make([]byte, 2)
+	data[0] = g.Reserved
+	data[1] = g.DataType
+	return data
+}
+
+func (g *GossipNotifyMessage) Unpack(data []byte) bool {
 	if len(data) != 2 {
 		return false
 	}
@@ -66,7 +82,15 @@ func (g *GossipNotifyMessage) unpack(data []byte) bool {
 	return true
 }
 
-func (g *GossipNotificationMessage) unpack(data []byte) bool {
+func (g *GossipNotificationMessage) Pack() []byte {
+	data := make([]byte, 4+len(g.Data))
+	binary.BigEndian.PutUint16(data[:2], g.MessageID)
+	binary.BigEndian.PutUint16(data[2:4], g.DataType)
+	copy(data[4:], g.Data)
+	return data
+}
+
+func (g *GossipNotificationMessage) Unpack(data []byte) bool {
 	if len(data) < 4 {
 		return false
 	}
@@ -76,7 +100,14 @@ func (g *GossipNotificationMessage) unpack(data []byte) bool {
 	return true
 }
 
-func (g *GossipValidationMessage) unpack(data []byte) bool {
+func (g *GossipValidationMessage) Pack() []byte {
+	data := make([]byte, 3)
+	binary.BigEndian.PutUint16(data[:2], g.MessageID)
+	data[2] = byte(g.Validation)
+	return data
+}
+
+func (g *GossipValidationMessage) Unpack(data []byte) bool {
 	if len(data) != 4 {
 		return false
 	}
@@ -120,7 +151,16 @@ type PeerInfo struct {
 	APIPort uint16 // Port of the peer
 }
 
-func (p *PeerBroadcastMessage) unpack(data []byte) bool {
+func (p *PeerBroadcastMessage) Pack() []byte {
+	data := make([]byte, 11+len(p.Data))
+	binary.BigEndian.PutUint64(data[:8], p.Id)
+	data[8] = p.Ttl
+	binary.BigEndian.PutUint16(data[9:11], p.Datatype)
+	copy(data[11:], p.Data)
+	return data
+}
+
+func (p *PeerBroadcastMessage) Unpack(data []byte) bool {
 	if len(data) < 11 {
 		return false
 	}
@@ -131,7 +171,11 @@ func (p *PeerBroadcastMessage) unpack(data []byte) bool {
 	return true
 }
 
-func (p *PeerRequestMessage) unpack(data []byte) bool {
+func (p *PeerRequestMessage) Pack() []byte {
+	return p.Id[:]
+}
+
+func (p *PeerRequestMessage) Unpack(data []byte) bool {
 	if len(data) != ID_SIZE {
 		return false
 	}
@@ -140,14 +184,25 @@ func (p *PeerRequestMessage) unpack(data []byte) bool {
 	return true
 }
 
-func (p *PeerDiscoveryMessage) unpack(data []byte) bool {
+func (p *PeerDiscoveryMessage) Pack() []byte {
+	return []byte{}
+}
+
+func (p *PeerDiscoveryMessage) Unpack(data []byte) bool {
 	if len(data) != 0 {
 		return false
 	}
 	return true
 }
 
-func (p *PeerValidationMessage) unpack(data []byte) bool {
+func (p *PeerValidationMessage) Pack() []byte {
+	data := make([]byte, 3)
+	binary.BigEndian.PutUint16(data[:2], p.MessageID)
+	data[2] = p.Validation
+	return data
+}
+
+func (p *PeerValidationMessage) Unpack(data []byte) bool {
 	if len(data) != 3 {
 		return false
 	}
@@ -156,7 +211,21 @@ func (p *PeerValidationMessage) unpack(data []byte) bool {
 	return true
 }
 
-func (p *PeerInfoMessage) unpack(data []byte) bool {
+func (p *PeerInfoMessage) Pack() []byte {
+	data := make([]byte, 2+int(p.Cnt)*12)
+	binary.BigEndian.PutUint16(data[:2], p.Cnt)
+	data = data[2:]
+	for i := 0; i < int(p.Cnt); i++ {
+		binary.BigEndian.PutUint32(data[:4], p.Peers[i].P2PIP)
+		binary.BigEndian.PutUint16(data[4:6], p.Peers[i].P2PPort)
+		binary.BigEndian.PutUint32(data[6:10], p.Peers[i].ApiIP)
+		binary.BigEndian.PutUint16(data[10:12], p.Peers[i].APIPort)
+		data = data[12:]
+	}
+	return data
+}
+
+func (p *PeerInfoMessage) Unpack(data []byte) bool {
 	if len(data) < 2 {
 		return false
 	}
