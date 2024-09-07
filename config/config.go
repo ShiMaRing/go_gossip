@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/spf13/viper"
 	"os"
+	"strings"
 )
 
 type GossipConfig struct {
@@ -46,6 +47,15 @@ func LoadConfig(configPath string) (*GossipConfig, *LogConfig, error) {
 	err = viper.UnmarshalKey("gossip", P2PConfig)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	//clear all " " at beginning and end of the string
+	P2PConfig.Bootstrapper = strings.TrimSpace(P2PConfig.Bootstrapper)
+	P2PConfig.P2PAddress = strings.TrimSpace(P2PConfig.P2PAddress)
+	P2PConfig.APIAddress = strings.TrimSpace(P2PConfig.APIAddress)
+	//check whether the knownPeers is empty
+	for i := 0; i < len(P2PConfig.KnownPeers); i++ {
+		P2PConfig.KnownPeers[i] = strings.TrimSpace(P2PConfig.KnownPeers[i])
 	}
 	//check some config parameter
 	if P2PConfig.CacheSize <= P2PConfig.Degree {

@@ -3,6 +3,7 @@ package connection
 import (
 	"go_gossip/config"
 	"go_gossip/model"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -48,15 +49,22 @@ func NewTCPManager(name string, ipAddr string, P2PConfig *config.GossipConfig, L
 	if err != nil { // when we start gossip server fail,just panic
 		tcpManager.Logger.Error("%s: api server listen failed", tcpManager.name, err)
 		panic(err)
-	}
-	defer listener.Close()
-	//now the gossip server is listening
+	} //now the gossip server is listening
+	tcpManager.Logger.Debug("server listening", "ipAddr", tcpManager.ipAddr, "name", tcpManager.name)
 	tcpManager.server = listener
+	tcpManager.openingConnection = make(map[string]net.Conn)
+	tcpManager.handlingConnection = make(map[string]net.Conn)
+	tcpManager.trustedConnection = make(map[string]bool)
 	return tcpManager
 }
 
 // ConnectToPeer connect to the peer
 func (g *TCPConnManager) ConnectToPeer(ipAddr string) error {
+	if ipAddr == g.ipAddr {
+		g.Logger.Error("%s: connect to self", "ipAddr", ipAddr)
+		return nil
+	}
+	g.Logger.Debug("Dial", "destIp", ipAddr, "sourceIp", g.ipAddr)
 	conn, err := net.Dial("tcp", ipAddr)
 	if err != nil {
 		g.Logger.Error("%s: connect to peer %s failed", g.name, ipAddr)
@@ -84,8 +92,8 @@ func (g *TCPConnManager) StartServer() {
 	for {
 		conn, err := g.server.Accept()
 		if err != nil {
-			g.Logger.Error("accept error", slog.String("error", err.Error()))
-			break
+			g.Logger.Error("accept error", slog.String("error", err.Error()), "ipAddr", g.ipAddr)
+			continue
 		}
 		g.Logger.Debug("%s: accept a connection from %s", g.name, conn.RemoteAddr().String())
 		go g.handleConn(conn)
@@ -132,6 +140,7 @@ func (g *TCPConnManager) BroadcastMessageToPeer(frame *model.CommonFrame, degree
 }
 
 func (g *TCPConnManager) Stop() {
+	g.Logger.Debug("stop the gossip server", "ipAddr", g.ipAddr)
 	_ = g.server.Close()
 	//close all the connection
 	g.connRWLock.Lock()
@@ -205,6 +214,7 @@ func (g *TCPConnManager) SendMessage(conn net.Conn, frame *model.CommonFrame) er
 		g.Logger.Error("%s: send message error with conn %s", g.name, conn.RemoteAddr().String())
 		return err
 	}
+	g.Logger.Info("send", "frame", frame.ToString(), "dest", conn.RemoteAddr().String())
 	return nil
 }
 
@@ -226,13 +236,13 @@ func (g *TCPConnManager) handleConn(conn net.Conn) {
 	for {
 		cnt = 0
 		if g.isClosed() {
-			g.Logger.Debug("%s: close the connection with %s", g.name, conn.RemoteAddr().String())
+			g.Logger.Debug("%s: close the connection with %s", g.name, conn.RemoteAddr().String(), slog.String("error", "server closed"))
 			return
 		}
 		frame := new(model.CommonFrame)
 		_, err := conn.Read(headerBuffer)
-		if err != nil {
-			g.Logger.Error("%s: read header error with conn %s", g.name, conn.RemoteAddr().String())
+		if err != nil && err != io.EOF {
+			g.Logger.Error("%s: read header error with conn %s", g.name, conn.RemoteAddr().String(), slog.String("error", err.Error()))
 			return
 		}
 		//parse the header
@@ -245,7 +255,7 @@ func (g *TCPConnManager) handleConn(conn net.Conn) {
 		payloadBuffer := make([]byte, frame.Size)
 		for cnt < frame.Size {
 			n, err := conn.Read(payloadBuffer[cnt:])
-			if err != nil {
+			if err != nil && err != io.EOF {
 				g.Logger.Error("%s: read payload error with conn %s", g.name, conn.RemoteAddr().String())
 				return
 			}
@@ -253,7 +263,7 @@ func (g *TCPConnManager) handleConn(conn net.Conn) {
 		}
 		frame.Payload = payloadBuffer
 		//put the frame to the inputFrameChan
-		g.Logger.Debug("%s receive a frame from %s", g.name, conn.RemoteAddr().String())
+		g.Logger.Info("receive", "frame", frame.ToString(), "source", conn.RemoteAddr().String())
 		inputFrameChan <- frame
 	}
 }
@@ -263,6 +273,10 @@ func (g *TCPConnManager) StartFrameHandler(inputFrameChan chan *model.CommonFram
 	for {
 		select {
 		case frame := <-inputFrameChan:
+			if frame == nil {
+				continue
+			}
+
 			success, err := g.HandleFrame(frame, conn, g)
 			if !success || err != nil {
 				g.Logger.Error("%s: handle frame error with conn %s", g.name, conn.RemoteAddr().String())

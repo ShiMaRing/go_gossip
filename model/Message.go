@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/binary"
+	"fmt"
 )
 
 type CommonFrame struct {
@@ -54,6 +55,33 @@ func (f *CommonFrame) Pack() []byte {
 	binary.BigEndian.PutUint16(data[2:4], f.Type)
 	copy(data[4:], f.Payload)
 	return data
+}
+
+func (f *CommonFrame) ToString() string {
+	var frameType string
+	switch f.Type {
+	case GOSSIP_NOTIFY:
+		frameType = "GOSSIP_NOTIFY"
+	case GOSSIP_ANNOUCE:
+		frameType = "GOSSIP_ANNOUNCE"
+	case GOSSIP_NOTIFICATION:
+		frameType = "GOSSIP_NOTIFICATION"
+	case GOSSIP_VALIDATION:
+		frameType = "GOSSIP_VALIDATION"
+	case PEER_BROADCAST:
+		frameType = "PEER_BROADCAST"
+	case PEER_REQUEST:
+		frameType = "PEER_REQUEST"
+	case PEER_VALIDATION:
+		frameType = "PEER_VALIDATION"
+	case PEER_DISCOVERY:
+		frameType = "PEER_DISCOVERY"
+	case PEER_INFO:
+		frameType = "PEER_INFO"
+	default:
+		frameType = "UNKNOWN"
+	}
+	return fmt.Sprintf("Size: %d, Type: %s", f.Size, frameType)
 }
 
 func (g *GossipAnnounceMessage) Pack() []byte {
@@ -233,6 +261,7 @@ func (p *PeerValidationMessage) Unpack(data []byte) bool {
 
 func (p *PeerInfoMessage) Pack() []byte {
 	data := make([]byte, 2+int(p.Cnt)*12)
+	prev := data
 	binary.BigEndian.PutUint16(data[:2], p.Cnt)
 	data = data[2:]
 	for i := 0; i < int(p.Cnt); i++ {
@@ -242,7 +271,7 @@ func (p *PeerInfoMessage) Pack() []byte {
 		binary.BigEndian.PutUint16(data[10:12], p.Peers[i].APIPort)
 		data = data[12:]
 	}
-	return data
+	return prev
 }
 
 func (p *PeerInfoMessage) Unpack(data []byte) bool {
@@ -268,7 +297,8 @@ func (p *PeerInfoMessage) Unpack(data []byte) bool {
 func MakeCommonFrame(messageType uint16, data []byte) *CommonFrame {
 	frame := &CommonFrame{}
 	frame.Type = messageType
-	frame.Payload = data
+	frame.Payload = make([]byte, len(data))
+	copy(frame.Payload, data)
 	frame.Size = uint16(len(data))
 	return frame
 }

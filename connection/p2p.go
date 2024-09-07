@@ -12,16 +12,12 @@ func NewBothServer(configPath string) (*PeerServer, *GossipServer) {
 	}
 	Logger := utils.LogInit(logConfig)
 	Logger.Info("config loaded")
+	Logger.Info("p2p address", "p2pAddress", P2PConfig.P2PAddress, "apiAddress", P2PConfig.APIAddress)
 	peerServer := NewPeerServer(P2PConfig, Logger)
 	gossipServer := NewGossipServer(P2PConfig, Logger)
 	peerServer.peerTcpManager.gossipServer = gossipServer
 	gossipServer.gossipTcpManager.peerServer = peerServer
 	return peerServer, gossipServer
-}
-
-func StartServer(peerServer *PeerServer, gossipServer *GossipServer) {
-	peerServer.PeerServerStart()
-	gossipServer.Start()
 }
 
 func CloseServer(peerServer *PeerServer, gossipServer *GossipServer) {

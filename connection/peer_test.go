@@ -1,27 +1,44 @@
 package connection
 
 import (
-	"fmt"
-	"sync"
+	"net"
 	"testing"
+	"time"
 )
 
-func TestGossip(t *testing.T) {
+func TestServer(t *testing.T) {
+	configPath := "../resources/config_1.ini"
+	peerServer, gossipServer := NewBothServer(configPath)
+	peerServer.PeerServerStart()
+	go gossipServer.Start()
 
-	wg := sync.WaitGroup{}
-	wg.Add(3)
-	for i := 1; i <= 3; i++ {
-		//generate config path
-		//../resources/config_i.ini
-		go func(i int) {
-			configPath := fmt.Sprintf("../resources/config_%d.ini", i)
-			println(configPath)
-			peerServer, gossipServer := NewBothServer(configPath)
-			StartServer(peerServer, gossipServer)
-			defer CloseServer(peerServer, gossipServer)
-			wg.Done()
-		}(i)
+	time.Sleep(time.Second * 2)
+	configPath = "../resources/config_2.ini"
+	peerServer, gossipServer = NewBothServer(configPath)
+	peerServer.PeerServerStart()
+	go gossipServer.Start()
+
+	time.Sleep(time.Second * 2)
+	configPath = "../resources/config_3.ini"
+	peerServer, gossipServer = NewBothServer(configPath)
+	peerServer.PeerServerStart()
+	go gossipServer.Start()
+
+	chn := make(chan int)
+	<-chn
+}
+
+func TestSingleServer(t *testing.T) {
+	configPath := "../resources/config_1.ini"
+	peerServer, gossipServer := NewBothServer(configPath)
+	peerServer.PeerServerStart()
+	go gossipServer.Start()
+
+	_, err := net.Dial("tcp", "127.0.0.1:6011")
+	if err != nil {
+		t.Fatal(err)
 	}
-	wg.Wait()
 
+	chn := make(chan int)
+	<-chn
 }

@@ -14,7 +14,13 @@ func LogInit(LoggerConfig *config.LogConfig) *slog.Logger {
 	if LoggerConfig.LogFile == "" {
 		writer = os.Stdout
 	} else {
-		file, err := os.OpenFile(LoggerConfig.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		//if file exit ,delete it
+		_, err := os.Stat(LoggerConfig.LogFile)
+		if err == nil {
+			os.Remove(LoggerConfig.LogFile)
+		}
+
+		file, err := os.OpenFile(LoggerConfig.LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 		if err != nil {
 			fmt.Println("open log file failed, use stdout instead")
 			writer = os.Stdout
