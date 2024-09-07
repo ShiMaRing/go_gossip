@@ -24,6 +24,18 @@ func TestServer(t *testing.T) {
 	peerServer.PeerServerStart()
 	go gossipServer.Start()
 
+	time.Sleep(time.Second * 2)
+	configPath = "../resources/config_4.ini"
+	peerServer, gossipServer = NewBothServer(configPath)
+	peerServer.PeerServerStart()
+	go gossipServer.Start()
+
+	time.Sleep(time.Second * 2)
+	configPath = "../resources/config_5.ini"
+	peerServer, gossipServer = NewBothServer(configPath)
+	peerServer.PeerServerStart()
+	go gossipServer.Start()
+
 	chn := make(chan int)
 	<-chn
 }

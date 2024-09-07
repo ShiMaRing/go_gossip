@@ -23,7 +23,6 @@ type PeerServer struct {
 	listLock        sync.RWMutex
 	cacheSize       int
 	ourself         model.PeerInfo
-	connIDMapLock   sync.RWMutex
 	wg              sync.WaitGroup
 	receivedMessage map[uint64]bool
 	revMsgLock      sync.RWMutex
@@ -60,7 +59,7 @@ func (p *PeerServer) PeerServerStart() {
 			p.listLock.Lock()
 			for _, info := range peerInfo {
 				//we dont add ourself
-				if info.P2PIP == p.ourself.P2PIP {
+				if info.P2PIP == p.ourself.P2PIP && info.P2PPort == p.ourself.P2PPort {
 					continue
 				}
 				p2pAddr := utils.ConvertNum2Addr(info.P2PIP, info.P2PPort)
@@ -88,9 +87,7 @@ func (p *PeerServer) PeerServerStart() {
 			p.Logger.Error("get peer info from bootstrapper failed", "error", err)
 			panic(err)
 		}
-		p.listLock.Lock()
 		p.AddNewPeerInfos(infoList)
-		p.listLock.Unlock()
 	}
 
 	//in this time , we start peer server success, start a go routine to
@@ -103,9 +100,11 @@ func (p *PeerServer) PeerServerStart() {
 func (p *PeerServer) AddNewPeerInfos(infoList []model.PeerInfo) {
 	//now we get the peer info list from the peer
 	//add the peer info to the peer info list
+	p.listLock.Lock()
+	defer p.listLock.Unlock()
 	for _, info := range infoList {
 		//we dont add ourself
-		if info.P2PIP == p.ourself.P2PIP {
+		if info.P2PIP == p.ourself.P2PIP && info.P2PPort == p.ourself.P2PPort {
 			continue
 		}
 		p2pAddr := utils.ConvertNum2Addr(info.P2PIP, info.P2PPort)
@@ -136,43 +135,56 @@ func (p *PeerServer) AddNewPeerInfos(infoList []model.PeerInfo) {
 		}
 		delete(p.peerInfoMap, key)
 	}
+	//print current peer info list
+	p.Logger.Info("current peer info list", "size", len(p.peerInfoMap))
+	for key, info := range p.peerInfoMap {
+		p.Logger.Info("peer info", "key", key, "info", info)
+	}
 }
 
 func (p *PeerServer) PeerBackgroundTask() {
 	//in this go routine, we will do the following things
 	for true {
 		time.Sleep(time.Second * time.Duration(p.P2PConfig.MaintainInterval))
-		p.listLock.Lock()
+		p.listLock.RLock()
+		//randomly choose a peer from peer info list
+		randPeer := rand.Intn(len(p.peerInfoMap))
+		cnt := 0
+		unlocked := false
 		for addr, _ := range p.peerInfoMap {
-			if addr == p.P2PConfig.P2PAddress {
-				continue
+			if cnt >= randPeer && addr != p.P2PConfig.P2PAddress {
+				//pick a connection to the peer , and try to get the peer info
+				p.listLock.RUnlock()
+				unlocked = true
+				conn := p.peerTcpManager.GetPeerConnection(addr)
+				if conn == nil {
+					//connect to the peer
+					err := p.ConnectToPeer(addr)
+					if err != nil {
+						p.Logger.Error("connect to peer failed", "error", err, "ipAddr", p.P2PConfig.P2PAddress, "peer", addr)
+						continue
+					}
+					info, err := p.GetPeerInfo(addr)
+					if err != nil {
+						continue
+					}
+					p.AddNewPeerInfos(info)
+				} else {
+					info, err := p.GetPeerInfo(addr)
+					if err != nil {
+						continue
+					}
+					p.AddNewPeerInfos(info)
+				}
+				break
 			}
-			//pick a connection to the peer , and try to get the peer info
-			conn := p.peerTcpManager.GetPeerConnection(addr)
-			if conn == nil {
-				//connect to the peer
-				err := p.ConnectToPeer(addr)
-				if err != nil {
-					p.Logger.Error("connect to peer failed", "error", err, "ipAddr", p.P2PConfig.P2PAddress, "peer", addr)
-					continue
-				}
-				info, err := p.GetPeerInfo(addr)
-				if err != nil {
-					continue
-				}
-				p.AddNewPeerInfos(info)
-			} else {
-				info, err := p.GetPeerInfo(addr)
-				if err != nil {
-					continue
-				}
-				p.AddNewPeerInfos(info)
-			}
-			break
+			cnt++
 		}
-		p.listLock.Unlock()
-		randCnt := rand.Intn(100) //have 50% chance to close some connection
+		if !unlocked {
+			p.listLock.RUnlock()
+		}
 
+		randCnt := rand.Intn(100) //have 50% chance to close some connection
 		//check the connection size , if the connection size is bigger than the min connection size
 		needClose := p.peerTcpManager.GetPeerConnectionSize() > p.P2PConfig.MinConnections
 		mustClose := p.peerTcpManager.GetPeerConnectionSize() > p.P2PConfig.MaxConnections
@@ -210,6 +222,7 @@ func NewPeerServer(P2PConfig *config.GossipConfig, Logger *slog.Logger) *PeerSer
 	peerServer.cacheSize = P2PConfig.CacheSize
 	peerServer.peerInfoMap = make(map[string]model.PeerInfo)
 	peerServer.Logger = Logger
+	peerServer.receivedMessage = make(map[uint64]bool)
 
 	var ourSelf = model.PeerInfo{}
 	//fill our self info with config
@@ -361,6 +374,10 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	}
 	//ok, we get the peer info message
 	//extract them and append them to the peer info list
+	//p.Logger.Debug("get peer info message", "cnt", peerInfo.Cnt)
+	//for _, info := range peerInfo.Peers {
+	//	p.Logger.Debug("peer info", "info", info)
+	//}
 	return peerInfo.Peers, nil
 }
 
@@ -418,6 +435,7 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 	}
 	peerServer := tcpManager.peerServer
 	gossipServer := tcpManager.gossipServer
+	peerServer.Logger.Debug("start handle peer frame", "frame", frame.ToString())
 	switch frame.Type {
 	case model.PEER_DISCOVERY:
 		discovery := &model.PeerDiscoveryMessage{}
@@ -433,7 +451,6 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		peerInfo := &model.PeerInfoMessage{}
 
 		peerServer.listLock.RLock()
-		defer peerServer.listLock.RUnlock()
 		peerInfo.Cnt = uint16(len(peerServer.peerInfoMap))
 		peerServer.Logger.Debug("send peer info message", "cnt", peerInfo.Cnt)
 		//add our self info to the peer info list
@@ -441,6 +458,7 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		for _, info := range peerServer.peerInfoMap {
 			peerInfo.Peers = append(peerInfo.Peers, info)
 		}
+		peerServer.listLock.RUnlock()
 		newFrame := model.MakeCommonFrame(model.PEER_INFO, peerInfo.Pack())
 		err := tcpManager.SendMessage(conn, newFrame) //send the peer info to the peer
 		if err != nil {

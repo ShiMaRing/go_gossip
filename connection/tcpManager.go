@@ -276,7 +276,6 @@ func (g *TCPConnManager) StartFrameHandler(inputFrameChan chan *model.CommonFram
 			if frame == nil {
 				continue
 			}
-
 			success, err := g.HandleFrame(frame, conn, g)
 			if !success || err != nil {
 				g.Logger.Error("%s: handle frame error with conn %s", g.name, conn.RemoteAddr().String())
