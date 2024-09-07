@@ -8,15 +8,13 @@ import (
 	"os"
 )
 
-var Logger *slog.Logger
-
-func LogInit() {
+func LogInit(LoggerConfig *config.LogConfig) *slog.Logger {
 	var writer io.Writer
 	var opt slog.HandlerOptions
-	if config.LoggerConfig.LogFile == "" {
+	if LoggerConfig.LogFile == "" {
 		writer = os.Stdout
 	} else {
-		file, err := os.OpenFile(config.LoggerConfig.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		file, err := os.OpenFile(LoggerConfig.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			fmt.Println("open log file failed, use stdout instead")
 			writer = os.Stdout
@@ -25,7 +23,7 @@ func LogInit() {
 		}
 	}
 	//set the log level
-	switch config.LoggerConfig.Level {
+	switch LoggerConfig.Level {
 	case "debug":
 		opt.Level = slog.LevelDebug
 	case "info":
@@ -38,5 +36,5 @@ func LogInit() {
 		opt.Level = slog.LevelInfo
 	}
 	opt.AddSource = true
-	Logger = slog.New(slog.NewTextHandler(writer, &opt))
+	return slog.New(slog.NewTextHandler(writer, &opt))
 }

@@ -4,6 +4,7 @@ import (
 	"go_gossip/config"
 	"go_gossip/model"
 	"go_gossip/utils"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -17,22 +18,21 @@ type GossipServer struct {
 	subscribedLock       sync.RWMutex
 	waitReplyList        map[uint16]chan bool
 	waitReplyLock        sync.RWMutex
+	P2PConfig            *config.GossipConfig
+	Logger               *slog.Logger
 }
 
-var gossipServer *GossipServer
-
-func GossipServerStart(ipAddr string) {
-	NewGossipServer(ipAddr)
-	gossipServer.Start()
-}
-
-func NewGossipServer(ipAddr string) {
+func NewGossipServer(P2PConfig *config.GossipConfig, Logger *slog.Logger) *GossipServer {
 	gossipServer := &GossipServer{
-		gossipTcpManager: NewTCPManager("APIServer", ipAddr),
+		gossipTcpManager: NewTCPManager("APIServer", P2PConfig.APIAddress, P2PConfig, Logger),
 	}
 	gossipServer.gossipTcpManager.HandleFrame = handleGossipFrame
 	gossipServer.subscribedConnection = make(map[uint16][]net.Conn)
 	gossipServer.waitReplyList = make(map[uint16]chan bool)
+	gossipServer.P2PConfig = P2PConfig
+	gossipServer.Logger = Logger
+	gossipServer.gossipTcpManager.gossipServer = gossipServer //set the gossip server
+	return gossipServer
 }
 
 func (g *GossipServer) Start() {
@@ -129,6 +129,8 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 	if frame == nil {
 		return false, nil
 	}
+	gossipServer := tcpManager.gossipServer
+	peerServer := tcpManager.peerServer
 	switch frame.Type {
 	case model.GOSSIP_ANNOUCE:
 		//handle the announcement message
@@ -144,9 +146,9 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 		peerAnnounce.Id = utils.GenerateUUID()
 		remain, _ := peerServer.BroadcastMessage(peerAnnounce)
 		if remain > 0 {
-			utils.Logger.Warn("Send the message to %d peers", config.P2PConfig.Degree-remain)
+			peerServer.Logger.Warn("Send the message to %d peers", peerServer.P2PConfig.Degree-remain)
 		} else {
-			utils.Logger.Warn("Send the message to all peers")
+			peerServer.Logger.Warn("Send the message to all peers")
 		}
 
 	case model.GOSSIP_NOTIFY:

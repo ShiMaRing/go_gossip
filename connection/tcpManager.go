@@ -3,7 +3,7 @@ package connection
 import (
 	"go_gossip/config"
 	"go_gossip/model"
-	"go_gossip/utils"
+	"log/slog"
 	"net"
 	"sync"
 )
@@ -26,20 +26,27 @@ type TCPConnManager struct {
 	cntRWLock         sync.RWMutex
 	closeFlagMutex    sync.Mutex
 
-	maxConnCnt int
-	minConnCnt int
+	maxConnCnt   int
+	minConnCnt   int
+	peerServer   *PeerServer
+	gossipServer *GossipServer
+
+	P2PConfig *config.GossipConfig
+	Logger    *slog.Logger
 }
 
 // NewTCPManager Base on the config apiAddress to create a gossip server
-func NewTCPManager(name string, ipAddr string) *TCPConnManager {
+func NewTCPManager(name string, ipAddr string, P2PConfig *config.GossipConfig, Logger *slog.Logger) *TCPConnManager {
 	var tcpManager = &TCPConnManager{}
 	tcpManager.ipAddr = ipAddr
 	tcpManager.name = name
-	tcpManager.minConnCnt = config.P2PConfig.MinConnections
-	tcpManager.maxConnCnt = config.P2PConfig.MaxConnections
+	tcpManager.Logger = Logger
+	tcpManager.P2PConfig = P2PConfig
+	tcpManager.minConnCnt = tcpManager.P2PConfig.MinConnections
+	tcpManager.maxConnCnt = tcpManager.P2PConfig.MaxConnections
 	listener, err := net.Listen("tcp", tcpManager.ipAddr)
 	if err != nil { // when we start gossip server fail,just panic
-		utils.Logger.Error("%s: api server listen failed", tcpManager.name, err)
+		tcpManager.Logger.Error("%s: api server listen failed", tcpManager.name, err)
 		panic(err)
 	}
 	defer listener.Close()
@@ -52,7 +59,7 @@ func NewTCPManager(name string, ipAddr string) *TCPConnManager {
 func (g *TCPConnManager) ConnectToPeer(ipAddr string) error {
 	conn, err := net.Dial("tcp", ipAddr)
 	if err != nil {
-		utils.Logger.Error("%s: connect to peer %s failed", g.name, ipAddr)
+		g.Logger.Error("%s: connect to peer %s failed", g.name, ipAddr)
 		return err
 	}
 	g.connRWLock.Lock()
@@ -77,10 +84,10 @@ func (g *TCPConnManager) StartServer() {
 	for {
 		conn, err := g.server.Accept()
 		if err != nil {
-			utils.Logger.Error("accept error", err)
+			g.Logger.Error("accept error", err)
 			break
 		}
-		utils.Logger.Debug("%s: accept a connection from %s", g.name, conn.RemoteAddr().String())
+		g.Logger.Debug("%s: accept a connection from %s", g.name, conn.RemoteAddr().String())
 		go g.handleConn(conn)
 	}
 }
@@ -186,7 +193,7 @@ func (g *TCPConnManager) GetConnectionByAddr(addr string) net.Conn {
 func (g *TCPConnManager) SendMessage(conn net.Conn, frame *model.CommonFrame) error {
 	_, err := conn.Write(frame.Pack())
 	if err != nil {
-		utils.Logger.Error("%s: send message error with conn %s", g.name, conn.RemoteAddr().String())
+		g.Logger.Error("%s: send message error with conn %s", g.name, conn.RemoteAddr().String())
 		return err
 	}
 	return nil
@@ -210,34 +217,34 @@ func (g *TCPConnManager) handleConn(conn net.Conn) {
 	for {
 		cnt = 0
 		if g.isClosed() {
-			utils.Logger.Debug("%s: close the connection with %s", g.name, conn.RemoteAddr().String())
+			g.Logger.Debug("%s: close the connection with %s", g.name, conn.RemoteAddr().String())
 			return
 		}
 		frame := new(model.CommonFrame)
 		_, err := conn.Read(headerBuffer)
 		if err != nil {
-			utils.Logger.Error("%s: read header error with conn %s", g.name, conn.RemoteAddr().String())
+			g.Logger.Error("%s: read header error with conn %s", g.name, conn.RemoteAddr().String())
 			return
 		}
 		//parse the header
 		frame.ParseHeader(headerBuffer)
 		//read the payload
 		if frame.Size > model.MAX_DATA_SIZE {
-			utils.Logger.Error("%s: frame size exceed the max size with conn %s", g.name, conn.RemoteAddr().String())
+			g.Logger.Error("%s: frame size exceed the max size with conn %s", g.name, conn.RemoteAddr().String())
 			return
 		}
 		payloadBuffer := make([]byte, frame.Size)
 		for cnt < frame.Size {
 			n, err := conn.Read(payloadBuffer[cnt:])
 			if err != nil {
-				utils.Logger.Error("%s: read payload error with conn %s", g.name, conn.RemoteAddr().String())
+				g.Logger.Error("%s: read payload error with conn %s", g.name, conn.RemoteAddr().String())
 				return
 			}
 			cnt += uint16(n)
 		}
 		frame.Payload = payloadBuffer
 		//put the frame to the inputFrameChan
-		utils.Logger.Debug("%s receive a frame from %s", g.name, conn.RemoteAddr().String())
+		g.Logger.Debug("%s receive a frame from %s", g.name, conn.RemoteAddr().String())
 		inputFrameChan <- frame
 	}
 }
@@ -249,7 +256,7 @@ func (g *TCPConnManager) StartFrameHandler(inputFrameChan chan *model.CommonFram
 		case frame := <-inputFrameChan:
 			success, err := g.HandleFrame(frame, conn, g)
 			if !success || err != nil {
-				utils.Logger.Error("%s: handle frame error with conn %s", g.name, conn.RemoteAddr().String())
+				g.Logger.Error("%s: handle frame error with conn %s", g.name, conn.RemoteAddr().String())
 				return
 			}
 		}
