@@ -95,32 +95,33 @@ func (g *GossipServer) AskSubscribers(broadcast *model.PeerBroadcastMessage) boo
 	}
 	g.subscribedLock.RUnlock()
 	if successCnt == 0 {
-		close(g.waitReplyList[randUint16])
 		g.waitReplyLock.Lock()
-		defer g.waitReplyLock.Unlock()
+		close(g.waitReplyList[randUint16])
 		delete(g.waitReplyList, randUint16)
+		g.waitReplyLock.Unlock()
 		return false
 	}
 
-	//start a timer to wait for the reply
-	//if the reply is not received in 5 seconds, we will return false
-	go func() {
-		<-time.After(5 * time.Second)
-		g.waitReplyLock.Lock()
-		defer g.waitReplyLock.Unlock()
-		close(g.waitReplyList[randUint16])
-		delete(g.waitReplyList, randUint16)
-	}()
-
 	//wait here for the reply
 	result := true
+	timeOut := time.After(5 * time.Second)
 	for i := 0; i < successCnt; i++ {
-		reply := <-g.waitReplyList[randUint16]
-		if !reply {
+		select {
+		case <-timeOut:
 			result = false
 			break
+		case reply := <-g.waitReplyList[randUint16]:
+			if !reply {
+				result = false
+				break
+			}
 		}
 	}
+
+	g.waitReplyLock.Lock()
+	close(g.waitReplyList[randUint16])
+	delete(g.waitReplyList, randUint16)
+	g.waitReplyLock.Unlock()
 
 	return result
 }
@@ -171,11 +172,11 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 		}
 		//get the id
 		id := validation.MessageID
-		gossipServer.waitReplyLock.Lock()
-		if gossipServer.waitReplyList[id] != nil {
+		gossipServer.waitReplyLock.RLock()
+		if gossipServer.waitReplyList[id] != nil { //so it was not close
 			gossipServer.waitReplyList[id] <- validation.Validation == 1
 		}
-		gossipServer.waitReplyLock.Unlock()
+		gossipServer.waitReplyLock.RUnlock()
 	default:
 		return false, nil //unknown message type
 	}
