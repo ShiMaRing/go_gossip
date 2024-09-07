@@ -150,12 +150,9 @@ func (p *PeerServer) PeerBackgroundTask() {
 		//randomly choose a peer from peer info list
 		randPeer := rand.Intn(len(p.peerInfoMap))
 		cnt := 0
-		unlocked := false
+		unlock := false
 		for addr, _ := range p.peerInfoMap {
 			if cnt >= randPeer && addr != p.P2PConfig.P2PAddress {
-				//pick a connection to the peer , and try to get the peer info
-				p.listLock.RUnlock()
-				unlocked = true
 				conn := p.peerTcpManager.GetPeerConnection(addr)
 				if conn == nil {
 					//connect to the peer
@@ -168,22 +165,24 @@ func (p *PeerServer) PeerBackgroundTask() {
 					if err != nil {
 						continue
 					}
+					p.listLock.RUnlock()
 					p.AddNewPeerInfos(info)
 				} else {
 					info, err := p.GetPeerInfo(addr)
 					if err != nil {
 						continue
 					}
+					p.listLock.RUnlock()
 					p.AddNewPeerInfos(info)
 				}
+				unlock = true
 				break
 			}
 			cnt++
 		}
-		if !unlocked {
+		if !unlock {
 			p.listLock.RUnlock()
 		}
-
 		randCnt := rand.Intn(100) //have 50% chance to close some connection
 		//check the connection size , if the connection size is bigger than the min connection size
 		needClose := p.peerTcpManager.GetPeerConnectionSize() > p.P2PConfig.MinConnections
