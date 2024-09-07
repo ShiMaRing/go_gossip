@@ -395,6 +395,7 @@ func (p *PeerServer) BroadcastMessage(announce *model.PeerBroadcastMessage) (int
 	//try our best to broadcast the message
 	remain := p.peerTcpManager.BroadcastMessageToPeer(frame, degree)
 	p.listLock.RLock()
+	defer p.listLock.RUnlock()
 	for addr, _ := range p.peerInfoMap {
 		//don't broadcast to ourselves
 		if addr == p.P2PConfig.P2PAddress {
@@ -418,13 +419,11 @@ func (p *PeerServer) BroadcastMessage(announce *model.PeerBroadcastMessage) (int
 			p.peerTcpManager.ClosePeer(addr)
 			continue
 		}
-		remain--
+		remain-- //send success
 		if remain == 0 {
 			break
 		}
 	}
-	p.listLock.RUnlock()
-
 	return remain, nil //return the remain degree
 }
 
