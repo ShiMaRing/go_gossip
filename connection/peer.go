@@ -19,24 +19,25 @@ type PeerServer struct {
 	// only the peer we know both the p2p and gossip address will be added to the
 	//peer info list
 	listLock      sync.RWMutex
-	mapLock       sync.RWMutex
 	cacheSize     int
 	ourself       model.PeerInfo
-	gossipServer  *GossipServer
 	connIDMapLock sync.RWMutex
 	wg            sync.WaitGroup
+
+	receivedMessage map[uint64]bool
+	revMsgLock      sync.RWMutex
 }
 
 var peerServer *PeerServer
 
 // PeerServerStart start the peer server, the server will automatically connect to the known peers
 // and fetch the peer info from the known peers, util the
-func PeerServerStart(ipAddr string) {
+func PeerServerStart() {
 	//min connection num should bigger than degree
 	//so we need to discovery the peer info first, size should more than min connection num
 	//when gossip want to connect the degree num of peer, try to use the current open connection first
 	//if the current open connection is not enough, we will try to connect to the new peer in the peer info list
-	NewPeerServer(ipAddr) //must success , because we will panic when meet error
+	NewPeerServer(config.P2PConfig.P2PAddress) //must success , because we will panic when meet error
 
 	go peerServer.StartPeerServer() //start the peer server
 
@@ -143,6 +144,7 @@ func PeerBackgroundTask() {
 	//in this go routine, we will do the following things
 	for true {
 		time.Sleep(time.Second * time.Duration(config.P2PConfig.MaintainInterval))
+		peerServer.listLock.Lock()
 		for addr, _ := range peerServer.peerInfoMap {
 			if addr == config.P2PConfig.P2PAddress {
 				continue
@@ -153,9 +155,7 @@ func PeerBackgroundTask() {
 				//connect to the peer
 				err := peerServer.ConnectToPeer(addr)
 				if err != nil {
-					peerServer.listLock.Lock()
 					delete(peerServer.peerInfoMap, addr)
-					peerServer.listLock.Unlock()
 				}
 				info, err := peerServer.GetPeerInfo(addr)
 				if err != nil {
@@ -165,8 +165,14 @@ func PeerBackgroundTask() {
 				break
 			}
 		}
+		peerServer.listLock.Unlock()
 		randCnt := rand.Intn(100) //have 50% chance to close some connection
-		if randCnt < 50 {
+
+		//check the connection size , if the connection size is bigger than the min connection size
+		needClose := peerServer.peerTcpManager.GetPeerConnectionSize() > config.P2PConfig.MinConnections
+		mustClose := peerServer.peerTcpManager.GetPeerConnectionSize() > config.P2PConfig.MaxConnections
+
+		if (randCnt < 50 && needClose) || mustClose {
 			//randomly close one connection
 			peerServer.listLock.RLock()
 			for addr, _ := range peerServer.peerInfoMap {
@@ -182,8 +188,8 @@ func PeerBackgroundTask() {
 				peerServer.peerTcpManager.ClosePeer(addr)
 				break
 			}
+			peerServer.listLock.RUnlock()
 		}
-
 	}
 
 }
@@ -351,6 +357,61 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	return peerInfo.Peers, nil
 }
 
+func (p *PeerServer) BroadcastMessage(announce *model.PeerBroadcastMessage) (int, error) {
+	//check the ttl
+	if announce.Ttl == 1 {
+		//no need to broadcast
+		return 0, nil
+	}
+	//else, we need to broadcast the message to all the peer we know
+	//decrease the ttl
+	frame := model.MakeCommonFrame(model.PEER_BROADCAST, announce.Pack())
+	degree := config.P2PConfig.Degree //min connection must bigger than degree
+	//we always have some connection to the peer, and the number of connection is bigger than the min connection
+	//try our best to broadcast the message
+	remain := p.peerTcpManager.BroadcastMessageToPeer(frame, degree)
+	toRemove := make([]string, 0)
+	//choose the peer to broadcast
+	p.listLock.RLock()
+	for addr, _ := range p.peerInfoMap {
+		//don't broadcast to ourselves
+		if addr == config.P2PConfig.P2PAddress {
+			continue
+		}
+		//check the connection is already connected
+		conn := p.peerTcpManager.GetPeerConnection(addr)
+		if conn != nil {
+			continue
+		}
+		//connect to the peer
+		err := p.ConnectToPeer(addr)
+		if err != nil {
+			toRemove = append(toRemove, addr)
+			continue
+		}
+		//connect success, send the message to the peer
+		conn = p.peerTcpManager.GetPeerConnection(addr)
+		err = p.peerTcpManager.SendMessage(conn, frame)
+		if err != nil {
+			//close it
+			p.peerTcpManager.ClosePeer(addr)
+			continue
+		}
+		remain--
+		if remain == 0 {
+			break
+		}
+	}
+	p.listLock.RUnlock()
+
+	p.listLock.Lock()
+	for _, addr := range toRemove {
+		delete(p.peerInfoMap, addr)
+	}
+	p.listLock.Unlock()
+	return remain, nil //return the remain degree
+}
+
 // handlePeerFrame handle the peer frame in server side
 func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPConnManager) (bool, error) {
 	if frame == nil {
@@ -395,6 +456,30 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 			return false, nil
 		}
 		//ok, this time we receive a broadcast message
+		//check the data type, and broadcast the message to subscriber
+		if broadcast.Ttl == 1 {
+			return true, nil //no need to broadcast
+		}
+		//check the id ,if we have received this message, we don't need to broadcast
+		peerServer.revMsgLock.Lock()
+		if peerServer.receivedMessage[broadcast.Id] {
+			return true, nil
+		}
+		peerServer.receivedMessage[broadcast.Id] = true
+		peerServer.revMsgLock.Unlock()
+		//ask the gossip server can we spread this message
+
+		allow := gossipServer.AskSubscribers(broadcast)
+		if !allow {
+			return true, nil
+		}
+		//broadcast the message to the peer
+		broadcast.Ttl--
+		remain, _ := peerServer.BroadcastMessage(broadcast)
+		if remain != 0 {
+			utils.Logger.Warn("broadcast message to peer failed, remain degree is %d", remain)
+		}
+		return true, nil
 
 	case model.PEER_VALIDATION: //this is the packet for client , as a server ,we don't deal with it
 		return false, nil

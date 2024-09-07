@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -42,4 +43,13 @@ func ConvertAddr2Num(ipAddr string) (uint32, uint16, error) {
 func ConvertNum2Addr(ipNum uint32, port uint16) string {
 	ip := net.IPv4(byte(ipNum>>24), byte(ipNum>>16), byte(ipNum>>8), byte(ipNum))
 	return ip.String() + ":" + strconv.Itoa(int(port))
+}
+
+func GenerateUUID() uint64 {
+	// Generate a unique id using a random number generator
+	return uint64(rand.Uint32())<<32 | uint64(rand.Uint32())
+}
+
+func GenerateRandomNumber() uint16 {
+	return uint16(rand.Uint32())
 }

@@ -20,4 +20,5 @@ func main() {
 	}
 	utils.LogInit()
 	//start the gossip protocol
+
 }

@@ -101,6 +101,29 @@ func (g *TCPConnManager) GetPeerConnectionSize() int {
 	return len(g.openingConnection)
 }
 
+func (g *TCPConnManager) BroadcastMessageToPeer(frame *model.CommonFrame, degree int) int {
+	g.connRWLock.RLock()
+	var failedConnection = make([]string, 0)
+	for addr, conn := range g.openingConnection {
+		if degree == 0 {
+			break
+		}
+		degree--
+		err := g.SendMessage(conn, frame)
+		if err != nil {
+			failedConnection = append(failedConnection, addr)
+			continue //this connection is not available
+		}
+	}
+	g.connRWLock.RUnlock()
+
+	for _, addr := range failedConnection {
+		g.ClosePeer(addr)
+	}
+
+	return degree
+}
+
 func (g *TCPConnManager) Stop() {
 	_ = g.server.Close()
 	g.closeFlag = true
@@ -163,6 +186,7 @@ func (g *TCPConnManager) GetConnectionByAddr(addr string) net.Conn {
 func (g *TCPConnManager) SendMessage(conn net.Conn, frame *model.CommonFrame) error {
 	_, err := conn.Write(frame.Pack())
 	if err != nil {
+		utils.Logger.Error("%s: send message error with conn %s", g.name, conn.RemoteAddr().String())
 		return err
 	}
 	return nil
