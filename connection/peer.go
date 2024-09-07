@@ -143,18 +143,13 @@ func PeerBackgroundTask() {
 	//in this go routine, we will do the following things
 	for true {
 		time.Sleep(time.Second * time.Duration(config.P2PConfig.MaintainInterval))
-		connectionNum := peerServer.peerTcpManager.GetPeerConnectionSize()
-		if connectionNum < config.P2PConfig.MinConnections {
-			//use the peer info list to connect to the new peer
-			peerServer.listLock.RLock()
-			for addr, _ := range peerServer.peerInfoMap {
-				if addr == config.P2PConfig.P2PAddress {
-					continue
-				}
-				//check the connection is already connected
-				if peerServer.peerTcpManager.GetConnectionByAddr(addr) != nil {
-					continue
-				}
+		for addr, _ := range peerServer.peerInfoMap {
+			if addr == config.P2PConfig.P2PAddress {
+				continue
+			}
+			//check if this peer is connected
+			conn := peerServer.peerTcpManager.GetPeerConnection(addr)
+			if conn == nil {
 				//connect to the peer
 				err := peerServer.ConnectToPeer(addr)
 				if err != nil {
@@ -167,15 +162,12 @@ func PeerBackgroundTask() {
 					continue
 				}
 				peerServer.AddNewPeerInfos(info)
-				//check whether the connection num is enough
-				connectionNum = peerServer.peerTcpManager.GetPeerConnectionSize()
-				if connectionNum >= config.P2PConfig.MinConnections {
-					break
-				}
+				break
 			}
-		} else if connectionNum > config.P2PConfig.MaxConnections {
-			//randomly close some connection
-			toClose := connectionNum - config.P2PConfig.MaxConnections
+		}
+		randCnt := rand.Intn(100) //have 50% chance to close some connection
+		if randCnt < 50 {
+			//randomly close one connection
 			peerServer.listLock.RLock()
 			for addr, _ := range peerServer.peerInfoMap {
 				if addr == config.P2PConfig.P2PAddress {
@@ -188,53 +180,8 @@ func PeerBackgroundTask() {
 				}
 				//close the connection
 				peerServer.peerTcpManager.ClosePeer(addr)
-				toClose--
-				if toClose == 0 {
-					break
-				}
+				break
 			}
-		} else {
-			for addr, _ := range peerServer.peerInfoMap {
-				if addr == config.P2PConfig.P2PAddress {
-					continue
-				}
-				//check if this peer is connected
-				conn := peerServer.peerTcpManager.GetPeerConnection(addr)
-				if conn == nil {
-					//connect to the peer
-					err := peerServer.ConnectToPeer(addr)
-					if err != nil {
-						peerServer.listLock.Lock()
-						delete(peerServer.peerInfoMap, addr)
-						peerServer.listLock.Unlock()
-					}
-					info, err := peerServer.GetPeerInfo(addr)
-					if err != nil {
-						continue
-					}
-					peerServer.AddNewPeerInfos(info)
-					break
-				}
-			}
-			randCnt := rand.Intn(100) //have 50% chance to close some connection
-			if randCnt < 50 {
-				//randomly close some connection
-				peerServer.listLock.RLock()
-				for addr, _ := range peerServer.peerInfoMap {
-					if addr == config.P2PConfig.P2PAddress {
-						continue
-					}
-					//check the connection is already connected
-					conn := peerServer.peerTcpManager.GetPeerConnection(addr)
-					if conn == nil {
-						continue
-					}
-					//close the connection
-					peerServer.peerTcpManager.ClosePeer(addr)
-					break
-				}
-			}
-
 		}
 
 	}
