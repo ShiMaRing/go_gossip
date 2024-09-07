@@ -10,4 +10,5 @@ func main() {
 	if len(args) < 1 {
 		panic("config file path is required")
 	}
+
 }

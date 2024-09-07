@@ -31,66 +31,69 @@ type PeerServer struct {
 	Logger          *slog.Logger
 }
 
-func PeerServerStart(P2PConfig *config.GossipConfig, Logger *slog.Logger) {
+func (p *PeerServer) Close() {
+	p.peerTcpManager.Stop()
+}
 
-	peerServer := NewPeerServer(P2PConfig, Logger) //must success , because we will panic when meet error
+func (p *PeerServer) PeerServerStart() {
 
-	go peerServer.StartPeerServer() //start the peer server
-
+	go p.peerTcpManager.StartServer() //start the peer server
 	//wait for some time
 	time.Sleep(time.Second * 1)
 
-	peerServer.wg.Add(len(peerServer.P2PConfig.KnownPeers))
-	for _, peer := range peerServer.P2PConfig.KnownPeers {
+	p.wg.Add(len(p.P2PConfig.KnownPeers))
+	for _, peer := range p.P2PConfig.KnownPeers {
 		go func(peer string) {
-			defer peerServer.wg.Done()
-			err := peerServer.ConnectToPeer(peer)
+			defer p.wg.Done()
+			err := p.ConnectToPeer(peer)
 			if err != nil {
-				peerServer.listLock.Lock()
-				delete(peerServer.peerInfoMap, peer)
-				peerServer.listLock.Unlock()
+				p.listLock.Lock()
+				delete(p.peerInfoMap, peer)
+				p.listLock.Unlock()
 				return
 			}
 			//connect success , fetch the peer info from the peer
-			peerInfo, err := peerServer.GetPeerInfo(peer)
+			peerInfo, err := p.GetPeerInfo(peer)
 			if err != nil {
 				return
 			}
 			//now we get the peer info list from the peer
 			//add the peer info to the peer info list
-			peerServer.listLock.Lock()
+			p.listLock.Lock()
 			for _, info := range peerInfo {
 				//we dont add ourself
-				if info.P2PIP == peerServer.ourself.P2PIP {
+				if info.P2PIP == p.ourself.P2PIP {
 					continue
 				}
 				p2pAddr := utils.ConvertNum2Addr(info.P2PIP, info.P2PPort)
-				peerServer.peerInfoMap[p2pAddr] = info
+				p.peerInfoMap[p2pAddr] = info
 			}
-			peerServer.listLock.Unlock()
+			p.listLock.Unlock()
 		}(peer)
 	}
-	peerServer.wg.Wait()
+
+	p.wg.Wait()
+	p.Logger.Info("connect to known peers success", "number", len(p.P2PConfig.KnownPeers))
 
 	//if we don't have known peers, or all the known peers are not available
-	if len(peerServer.P2PConfig.KnownPeers) == 0 || peerServer.peerTcpManager.GetPeerConnectionSize() == 0 {
+	if len(p.P2PConfig.KnownPeers) == 0 || p.peerTcpManager.GetPeerConnectionSize() == 0 {
 		//connect to the bootstrapper
-		err := peerServer.ConnectToPeer(peerServer.P2PConfig.Bootstrapper)
+		err := p.ConnectToPeer(p.P2PConfig.Bootstrapper)
 		if err != nil {
-			peerServer.Logger.Error("connect to bootstrapper failed", err)
+			p.Logger.Error("connect to bootstrapper failed", "error", err)
 			panic(err)
 		}
 		//connect success , fetch the peer info from the peer
-		infoList, err := peerServer.GetPeerInfo(peerServer.P2PConfig.Bootstrapper)
+		infoList, err := p.GetPeerInfo(p.P2PConfig.Bootstrapper)
 		if err != nil {
-			peerServer.Logger.Error("get peer info from bootstrapper failed", err)
+			p.Logger.Error("get peer info from bootstrapper failed", "error", err)
 			panic(err)
 		}
-		peerServer.AddNewPeerInfos(infoList)
+		p.AddNewPeerInfos(infoList)
 	}
 
 	//in this time , we start peer server success, start a go routine to
-	go peerServer.PeerBackgroundTask()
+	go p.PeerBackgroundTask()
 
 	//then start the gossip server and listen here
 
@@ -206,12 +209,12 @@ func NewPeerServer(P2PConfig *config.GossipConfig, Logger *slog.Logger) *PeerSer
 	//fill our self info with config
 	ourSelf.P2PIP, ourSelf.P2PPort, err = utils.ConvertAddr2Num(P2PConfig.P2PAddress)
 	if err != nil {
-		peerServer.Logger.Error("convert address to num failed", err)
+		peerServer.Logger.Error("convert address to num failed", "error", err)
 		panic(err)
 	}
 	ourSelf.ApiIP, ourSelf.APIPort, err = utils.ConvertAddr2Num(peerServer.P2PConfig.APIAddress)
 	if err != nil {
-		peerServer.Logger.Error("convert address to num failed", err)
+		peerServer.Logger.Error("convert address to num failed", "error", err)
 		panic(err)
 	}
 	peerServer.ourself = ourSelf
@@ -220,7 +223,7 @@ func NewPeerServer(P2PConfig *config.GossipConfig, Logger *slog.Logger) *PeerSer
 	for _, peer := range peerServer.P2PConfig.KnownPeers {
 		p2pIP, port, err := utils.ConvertAddr2Num(peer)
 		if err != nil {
-			peerServer.Logger.Error("convert address to num failed", err)
+			peerServer.Logger.Error("convert address to num failed", "error", err)
 			continue
 		}
 		peerInfo := model.PeerInfo{
@@ -231,10 +234,6 @@ func NewPeerServer(P2PConfig *config.GossipConfig, Logger *slog.Logger) *PeerSer
 	}
 	peerServer.peerTcpManager.peerServer = peerServer //set the peer server
 	return peerServer
-}
-
-func (p *PeerServer) StartPeerServer() {
-	p.peerTcpManager.StartServer()
 }
 
 // ConnectToPeer connect to the peer
@@ -266,7 +265,7 @@ func (p *PeerServer) ConnectToPeer(ipAddr string) error {
 	headerBuffer := make([]byte, 4)
 	_, err = conn.Read(headerBuffer)
 	if err != nil {
-		p.Logger.Error("%s: read header failed", p.peerTcpManager.name)
+		p.Logger.Error(" read header failed", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return err
 	}
@@ -277,23 +276,23 @@ func (p *PeerServer) ConnectToPeer(ipAddr string) error {
 	payloadBuffer := make([]byte, frame.Size)
 	_, err = conn.Read(payloadBuffer)
 	if err != nil {
-		p.Logger.Error("%s: read payload failed", p.peerTcpManager.name)
+		p.Logger.Error("read payload failed", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return err
 	}
 	if frame.Type != model.PEER_VALIDATION {
-		p.Logger.Error("%s: receive a invalid message type", p.peerTcpManager.name)
+		p.Logger.Error("receive a invalid message type", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return fmt.Errorf("invalid message type")
 	}
 	validation := &model.PeerValidationMessage{}
 	if !validation.Unpack(payloadBuffer) {
-		p.Logger.Error("%s: unpack validation message failed", p.peerTcpManager.name)
+		p.Logger.Error("unpack validation message failed", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return fmt.Errorf("unpack validation message failed")
 	}
 	if validation.Validation == 0 {
-		p.Logger.Warn("%s: peer %s reject the connection", p.peerTcpManager.name, ipAddr)
+		p.Logger.Warn("peer reject the connection", "server", p.peerTcpManager.name, "dest", ipAddr)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return fmt.Errorf("peer reject the connection")
 	}
@@ -323,7 +322,7 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	headerBuffer := make([]byte, 4)
 	_, err = conn.Read(headerBuffer)
 	if err != nil {
-		p.Logger.Error("%s: read header failed", p.peerTcpManager.name)
+		p.Logger.Error("read header failed", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return nil, err
 	}
@@ -331,7 +330,7 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	frame = new(model.CommonFrame)
 	frame.ParseHeader(headerBuffer)
 	if frame.Type != model.PEER_INFO || frame.Size > model.MAX_DATA_SIZE {
-		p.Logger.Error("%s: receive a invalid message type", p.peerTcpManager.name)
+		p.Logger.Error("receive a invalid message type", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return nil, fmt.Errorf("invalid message type")
 	}
@@ -341,7 +340,7 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	for cnt < frame.Size {
 		n, err := conn.Read(payloadBuffer[cnt:])
 		if err != nil {
-			p.Logger.Error("%s: read payload failed", p.peerTcpManager.name)
+			p.Logger.Error("read payload failed", "server", p.peerTcpManager.name)
 			defer p.peerTcpManager.ClosePeer(ipAddr)
 			break
 		}
@@ -349,7 +348,7 @@ func (p *PeerServer) GetPeerInfo(ipAddr string) ([]model.PeerInfo, error) {
 	}
 	peerInfo := &model.PeerInfoMessage{}
 	if !peerInfo.Unpack(payloadBuffer) {
-		p.Logger.Error("%s: unpack peer info message failed", p.peerTcpManager.name)
+		p.Logger.Error("unpack peer info message failed", "server", p.peerTcpManager.name)
 		defer p.peerTcpManager.ClosePeer(ipAddr)
 		return nil, fmt.Errorf("unpack peer info message failed")
 	}
@@ -480,7 +479,7 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		broadcast.Ttl--
 		remain, _ := peerServer.BroadcastMessage(broadcast)
 		if remain != 0 {
-			peerServer.Logger.Warn("broadcast message to peer failed, remain degree is %d", remain)
+			peerServer.Logger.Warn("broadcast message to peer failed", "remain", remain)
 		}
 		return true, nil
 

@@ -84,7 +84,7 @@ func (g *TCPConnManager) StartServer() {
 	for {
 		conn, err := g.server.Accept()
 		if err != nil {
-			g.Logger.Error("accept error", err)
+			g.Logger.Error("accept error", slog.String("error", err.Error()))
 			break
 		}
 		g.Logger.Debug("%s: accept a connection from %s", g.name, conn.RemoteAddr().String())
@@ -133,6 +133,15 @@ func (g *TCPConnManager) BroadcastMessageToPeer(frame *model.CommonFrame, degree
 
 func (g *TCPConnManager) Stop() {
 	_ = g.server.Close()
+	//close all the connection
+	g.connRWLock.Lock()
+	for _, conn := range g.openingConnection {
+		_ = conn.Close()
+	}
+	for _, conn := range g.handlingConnection {
+		_ = conn.Close()
+	}
+	g.connRWLock.Unlock()
 	g.closeFlag = true
 }
 

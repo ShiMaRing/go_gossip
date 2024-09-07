@@ -146,7 +146,7 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 		peerAnnounce.Id = utils.GenerateUUID()
 		remain, _ := peerServer.BroadcastMessage(peerAnnounce)
 		if remain > 0 {
-			peerServer.Logger.Warn("Send the message to %d peers", peerServer.P2PConfig.Degree-remain)
+			peerServer.Logger.Warn("Send the message to peers", "remain", remain)
 		} else {
 			peerServer.Logger.Warn("Send the message to all peers")
 		}
