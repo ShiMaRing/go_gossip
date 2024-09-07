@@ -95,6 +95,12 @@ func (g *TCPConnManager) GetPeerConnection(addr string) net.Conn {
 	return conn
 }
 
+func (g *TCPConnManager) GetPeerConnectionSize() int {
+	g.connRWLock.RLock()
+	defer g.connRWLock.RUnlock()
+	return len(g.openingConnection)
+}
+
 func (g *TCPConnManager) Stop() {
 	_ = g.server.Close()
 	g.closeFlag = true

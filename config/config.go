@@ -15,14 +15,15 @@ var P2PConfig *GossipConfig
 var LoggerConfig *LogConfig
 
 type GossipConfig struct {
-	CacheSize      int      `mapstructure:"cache_size"`
-	Degree         int      `mapstructure:"degree"`
-	MinConnections int      `mapstructure:"minConnections"`
-	MaxConnections int      `mapstructure:"maxConnections"`
-	Bootstrapper   string   `mapstructure:"bootstrapper"`
-	P2PAddress     string   `mapstructure:"p2pAddress"`
-	APIAddress     string   `mapstructure:"apiAddress"`
-	KnownPeers     []string `mapstructure:"knownPeers"`
+	CacheSize        int      `mapstructure:"cache_size"`
+	Degree           int      `mapstructure:"degree"`
+	MinConnections   int      `mapstructure:"minConnections"`
+	MaxConnections   int      `mapstructure:"maxConnections"`
+	Bootstrapper     string   `mapstructure:"bootstrapper"`
+	P2PAddress       string   `mapstructure:"p2pAddress"`
+	APIAddress       string   `mapstructure:"apiAddress"`
+	KnownPeers       []string `mapstructure:"knownPeers"`
+	MaintainInterval int      `mapstructure:"maintainInterval"`
 }
 
 type LogConfig struct {
@@ -52,6 +53,21 @@ func LoadConfig(configPath string) (*GossipConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	//check some config parameter
+	if P2PConfig.CacheSize <= P2PConfig.Degree {
+		return nil, os.ErrInvalid
+	} else if P2PConfig.MinConnections > P2PConfig.MaxConnections {
+		return nil, os.ErrInvalid
+	} else if P2PConfig.Degree < 1 {
+		return nil, os.ErrInvalid
+	} else if P2PConfig.Bootstrapper == "" { //the bootstrapper is the first peer we connect to
+		return nil, os.ErrInvalid
+	} else if P2PConfig.P2PAddress == "" { //the p2p address is the address we listen to
+		return nil, os.ErrInvalid
+	} else if P2PConfig.APIAddress == "" { //the api address is the address we listen to
+		return nil, os.ErrInvalid
+	}
+
 	err = viper.UnmarshalKey("log", LoggerConfig)
 	if err != nil {
 		return nil, err
