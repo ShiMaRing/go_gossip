@@ -57,10 +57,11 @@ func (g *GossipServer) SubscribeConnection(dataType uint16, conn net.Conn) {
 func (g *GossipServer) AskSubscribers(broadcast *model.PeerBroadcastMessage) bool {
 	g.subscribedLock.RLock()
 	if _, ok := g.subscribedConnection[broadcast.Datatype]; !ok {
+		g.Logger.Warn("No subscriber for the data type", "dataType", broadcast.Datatype)
 		g.subscribedLock.RUnlock()
 		return false
 	}
-
+	g.Logger.Debug("Ask the subscribers", "dataType", broadcast.Datatype, "subscriberCount", len(g.subscribedConnection[broadcast.Datatype]))
 	//generate a gossip notification message
 	notification := &model.GossipNotificationMessage{}
 	var randUint16 = utils.GenerateRandomNumber()
@@ -79,10 +80,12 @@ func (g *GossipServer) AskSubscribers(broadcast *model.PeerBroadcastMessage) boo
 
 	mu := sync.Mutex{}
 	successCnt := 0
-
+	wg := sync.WaitGroup{}
+	wg.Add(len(g.subscribedConnection[broadcast.Datatype]))
 	for _, conn := range g.subscribedConnection[broadcast.Datatype] {
 		if conn != nil {
 			go func(conn net.Conn) {
+				defer wg.Done()
 				err := g.gossipTcpManager.SendMessage(conn, frame)
 				if err != nil {
 					conn.Close()
@@ -94,7 +97,10 @@ func (g *GossipServer) AskSubscribers(broadcast *model.PeerBroadcastMessage) boo
 		}
 	}
 	g.subscribedLock.RUnlock()
-	if successCnt == 0 {
+
+	wg.Wait()
+
+	if successCnt == 0 { //all subscribers are failed
 		g.waitReplyLock.Lock()
 		close(g.waitReplyList[randUint16])
 		delete(g.waitReplyList, randUint16)
@@ -132,11 +138,13 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 	}
 	gossipServer := tcpManager.gossipServer
 	peerServer := tcpManager.peerServer
+	peerServer.Logger.Debug("Receive a frame", "frame", frame.ToString(), "from", conn.RemoteAddr().String())
 	switch frame.Type {
 	case model.GOSSIP_ANNOUCE:
 		//handle the announcement message
 		announce := &model.GossipAnnounceMessage{}
 		if !announce.Unpack(frame.Payload) {
+			peerServer.Logger.Error("Unpack the announce message failed", "payload", frame.Payload)
 			return false, nil
 		}
 		peerAnnounce := &model.PeerBroadcastMessage{}
@@ -151,14 +159,16 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 		} else {
 			peerServer.Logger.Warn("Send the message to all peers")
 		}
-
+		return true, nil
 	case model.GOSSIP_NOTIFY:
 		//handle the notify message
 		notify := &model.GossipNotifyMessage{}
 		if !notify.Unpack(frame.Payload) {
+			peerServer.Logger.Error("Unpack the notify message failed")
 			return false, nil
 		}
 		gossipServer.SubscribeConnection(uint16(notify.DataType), conn)
+		return true, nil
 
 	case model.GOSSIP_NOTIFICATION:
 		//as a server, we should not receive the notification message
@@ -180,5 +190,5 @@ func handleGossipFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPC
 	default:
 		return false, nil //unknown message type
 	}
-	return false, nil
+	return true, nil
 }

@@ -104,6 +104,10 @@ func (g *GossipAnnounceMessage) Unpack(data []byte) bool {
 	return true
 }
 
+func (g *GossipAnnounceMessage) ToString() string {
+	return fmt.Sprintf("TTL: %d, DataType: %d, Data: %s", g.TTL, g.DataType, string(g.Data))
+}
+
 func (g *GossipNotifyMessage) Pack() []byte {
 	data := make([]byte, 2)
 	data[0] = g.Reserved
@@ -138,10 +142,14 @@ func (g *GossipNotificationMessage) Unpack(data []byte) bool {
 	return true
 }
 
+func (g *GossipNotificationMessage) ToString() string {
+	return fmt.Sprintf("MessageID: %d, DataType: %d, Data: %s", g.MessageID, g.DataType, string(g.Data))
+}
+
 func (g *GossipValidationMessage) Pack() []byte {
-	data := make([]byte, 3)
+	data := make([]byte, 4)
 	binary.BigEndian.PutUint16(data[:2], g.MessageID)
-	data[2] = byte(g.Validation)
+	binary.BigEndian.PutUint16(data[2:4], g.Validation)
 	return data
 }
 
@@ -152,6 +160,10 @@ func (g *GossipValidationMessage) Unpack(data []byte) bool {
 	g.MessageID = binary.BigEndian.Uint16(data[:2])
 	g.Validation = binary.BigEndian.Uint16(data[2:4])
 	return true
+}
+
+func (g *GossipValidationMessage) ToString() string {
+	return fmt.Sprintf("MessageID: %d, Validation: %d", g.MessageID, g.Validation)
 }
 
 // =========================================================

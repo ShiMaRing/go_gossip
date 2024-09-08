@@ -419,6 +419,7 @@ func (p *PeerServer) BroadcastMessage(announce *model.PeerBroadcastMessage) (int
 			continue
 		}
 		remain-- //send success
+		p.Logger.Debug("broadcast message to peer success", "peer", addr)
 		if remain == 0 {
 			break
 		}
@@ -476,23 +477,27 @@ func handlePeerFrame(frame *model.CommonFrame, conn net.Conn, tcpManager *TCPCon
 		//ok, this time we receive a broadcast message
 		//check the data type, and broadcast the message to subscriber
 		if broadcast.Ttl == 1 {
+			peerServer.Logger.Debug("receive a ttl=1 message", "id", broadcast.Id, "type", broadcast.Datatype)
 			return true, nil //no need to broadcast
 		}
-		//check the id ,if we have received this message, we don't need to broadcast
+		//check the id ,if we have received this message, we don't need to broadcast it anymore
 		peerServer.revMsgLock.Lock()
 		if peerServer.receivedMessage[broadcast.Id] {
+			peerServer.Logger.Debug("receive a duplicate message", "id", broadcast.Id, "peer",
+				conn.RemoteAddr().String(), "dataType", broadcast.Datatype)
 			return true, nil
 		}
 		peerServer.receivedMessage[broadcast.Id] = true
 		peerServer.revMsgLock.Unlock()
 		//ask the gossip server can we spread this message
-
 		allow := gossipServer.AskSubscribers(broadcast)
 		if !allow {
 			return true, nil
 		}
 		//broadcast the message to the peer
-		broadcast.Ttl--
+		if broadcast.Ttl > 1 {
+			broadcast.Ttl--
+		}
 		remain, _ := peerServer.BroadcastMessage(broadcast)
 		if remain != 0 {
 			peerServer.Logger.Warn("broadcast message to peer failed", "remain", remain)
